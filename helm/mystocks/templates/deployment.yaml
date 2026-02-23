@@ -31,7 +31,7 @@ spec:
                 name: {{ .Values.smtp.existingSecret }}
           readinessProbe:
             httpGet:
-              path: /accounts/login/
+              path: /login/
               port: 8000
               httpHeaders:
                 - name: Host
@@ -40,7 +40,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /accounts/login/
+              path: /login/
               port: 8000
               httpHeaders:
                 - name: Host
