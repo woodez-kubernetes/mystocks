@@ -1,24 +1,19 @@
 replicaCount: 1
-
 image:
   repository: kwood475/mystocks
-  tag: latest
+  tag: release-dev-7863d76
   pullPolicy: Always
-
 namespace: woodez-database
-
 ingress:
   enabled: true
   className: nginx
   host: mystocks.apexkube.xyz
-
 database:
   host: postgres-svc
   port: "5432"
   name: mystocks
   user: mystocks
   password: mystocks2026
-
 email:
   host: smtp.gmail.com
   port: "587"
@@ -26,14 +21,11 @@ email:
   password: ""
   from: ""
   to: ""
-
 django:
   secretKey: "change-me-in-production"
   debug: "False"
   allowedHosts: "mystocks.apexkube.xyz,localhost"
-
 ollama:
   host: "http://ollama-svc:11434"
-
 scheduler:
   interval: "60"
