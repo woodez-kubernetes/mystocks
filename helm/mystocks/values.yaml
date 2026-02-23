@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: kwood475/mystocks
-  tag: release-dev-7863d76
+  tag: release-dev-5197aa4
   pullPolicy: Always
 namespace: woodez-database
 ingress:
@@ -14,11 +14,9 @@ database:
   name: mystocks
   user: mystocks
   password: mystocks2026
-
 smtp:
   # Pre-created K8s Secret name containing EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, REPORT_RECIPIENT_EMAIL
   existingSecret: mystocks-smtp-secret
-
 django:
   secretKey: "change-me-in-production"
   debug: "False"
