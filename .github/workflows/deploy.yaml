@@ -1,0 +1,76 @@
+name: Build and Publish Docker Image
+
+on:
+  workflow_call:
+    # No required inputs - uses repository secrets
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      GITOPS_PUSH_TOKEN:
+        required: false
+
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_IMAGE_NAME: mystocks
+jobs:
+  setup_argocd_app:
+    name: Setup ArgoCD Application
+    runs-on: self-hosted
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Clean up ArgoCD
+        run: |
+          if [[ -f "/home/github-runner/argocd" ]]; then
+            echo "Removing existing /home/github-runner/argocd directory"
+            rm -rf /home/github-runner/argocd
+          else
+            echo "/home/github-runner/argocd does not exist, proceeding."
+          fi
+
+      - name: Setup ArgoCD CLI
+        uses: clowdhaus/argo-cd-action@main
+        with:
+          version: 2.13.8
+
+      - name: Login to ArgoCD Server
+        run: |
+          argocd login ${{ secrets.ARGOCD_SERVER }} \
+            --username ${{ secrets.ARGOCD_USERNAME }} \
+            --password ${{ secrets.ARGOCD_PASSWORD }} \
+            --insecure
+
+      - name: Add GitOps Repository to ArgoCD (If not exist)
+        id: add_repo
+        run: |
+          echo "Attempting to add repository: ${{ secrets.GIT_REPO_URL }}"
+          argocd repo add ${{ secrets.GIT_REPO_URL }} || echo "Repository likely already exists in ArgoCD, continuing..."
+
+      - name: Check if Application Exists and Create if Missing
+        run: |
+          APP_NAME="mystocks"
+
+          if argocd app get $APP_NAME &>/dev/null; then
+            echo "ArgoCD Application '$APP_NAME' already exists."
+            argocd app sync $APP_NAME --prune --timeout 300
+            echo "Application synced successfully"
+          else
+            echo "ArgoCD Application $APP_NAME does not exist. Creating.."
+            argocd app create $APP_NAME --file ./argocd/application.yaml --upsert
+
+            echo "Waiting for ArgoCD to finish creating the application..."
+            sleep 10
+
+            echo "Attempting initial sync..."
+            argocd app sync $APP_NAME --prune --timeout 300 || echo "Initial sync may still be processing"
+            echo "Application created and initial sync triggered"
+          fi

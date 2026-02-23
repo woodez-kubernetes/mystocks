@@ -27,12 +27,8 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Release.Name }}-secret
-          env:
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secret
-                  key: DB_PASSWORD
+            - secretRef:
+                name: {{ .Values.smtp.existingSecret }}
           readinessProbe:
             httpGet:
               path: /accounts/login/
@@ -55,9 +51,5 @@ spec:
                 name: {{ .Release.Name }}-config
             - secretRef:
                 name: {{ .Release.Name }}-secret
-          env:
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Release.Name }}-secret
-                  key: DB_PASSWORD
+            - secretRef:
+                name: {{ .Values.smtp.existingSecret }}

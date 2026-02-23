@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mystocks
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/woodez-kubernetes/mystocks.git
+    targetRevision: release-dev
+    path: helm/mystocks
+
+
+    helm:
+      releaseName: mystocks
+
+      valueFiles:
+        - values.yaml
+      
+      values: |
+        image:
+          respository: kwood475/mystocks
+          # tag is controlled by values.yaml (updated by CI/CD workflow)
+       
+        namespace: woodez-database
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: woodez-database
+
+  syncPolicy:
+    # test
+    # automated:
+    #  prune: true
+    #  selfHeal: true
+    #  allowEmpty: false
+
+    syncOptions:
+      # Create namespace if it doesn't exist
+      - CreateNamespace=true
+      # Respect ignore differences
+      - RespectIgnoreDifferences=true
+      # Server-side apply
+      - ServerSideApply=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
