@@ -33,12 +33,18 @@ spec:
             httpGet:
               path: /accounts/login/
               port: 8000
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.ingress.host }}
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /accounts/login/
               port: 8000
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.ingress.host }}
             initialDelaySeconds: 15
             periodSeconds: 20
 
