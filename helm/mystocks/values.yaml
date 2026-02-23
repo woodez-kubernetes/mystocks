@@ -19,13 +19,9 @@ database:
   user: mystocks
   password: mystocks2026
 
-email:
-  host: smtp.gmail.com
-  port: "587"
-  user: ""
-  password: ""
-  from: ""
-  to: ""
+smtp:
+  # Pre-created K8s Secret name containing EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, REPORT_RECIPIENT_EMAIL
+  existingSecret: mystocks-smtp-secret
 
 django:
   secretKey: "change-me-in-production"
