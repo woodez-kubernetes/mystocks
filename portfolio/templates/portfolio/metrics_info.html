@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}How Metrics Work - MyStocks{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><i class="bi bi-info-circle me-2"></i>How Metrics Work</h2>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+    </a>
+</div>
+
+<!-- Opportunity Score Overview -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white">
+        <h4 class="mb-0">The Opportunity Score (0&ndash;100)</h4>
+    </div>
+    <div class="card-body">
+        <p>Every tracked stock is assigned an <strong>Opportunity Score</strong> from 0 to 100. This is the single number you see on the Opportunities page, in holdings tables, and on ticker detail pages. It represents how favorable conditions are for <em>buying</em> that stock right now.</p>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="card border-success">
+                    <div class="card-body text-center">
+                        <span class="badge bg-success fs-5 mb-2">70&ndash;100</span>
+                        <p class="mb-0 fw-semibold text-success">Strong Buy Signal</p>
+                        <small class="text-muted">Multiple indicators suggest the stock is undervalued or has bullish momentum.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-warning">
+                    <div class="card-body text-center">
+                        <span class="badge bg-warning text-dark fs-5 mb-2">40&ndash;69</span>
+                        <p class="mb-0 fw-semibold text-warning">Hold / Neutral</p>
+                        <small class="text-muted">Mixed signals. The stock is neither clearly overvalued nor undervalued.</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-danger">
+                    <div class="card-body text-center">
+                        <span class="badge bg-danger fs-5 mb-2">0&ndash;39</span>
+                        <p class="mb-0 fw-semibold text-danger">Sell / Caution</p>
+                        <small class="text-muted">Multiple indicators suggest the stock may be overbought or has bearish momentum.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h5>How the Score is Calculated</h5>
+        <p>The Opportunity Score is a <strong>weighted average</strong> of six sub-scores, each derived from a different technical indicator or data source. Each sub-score is normalized to a 0&ndash;100 scale, then combined using these weights:</p>
+
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr>
+                        <th>Indicator</th>
+                        <th class="text-center">Weight (with sentiment)</th>
+                        <th class="text-center">Weight (without sentiment)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>RSI (Relative Strength Index)</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
+                    <tr><td>MACD (Moving Average Convergence Divergence)</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
+                    <tr><td>Bollinger Bands</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
+                    <tr><td>SMA (Simple Moving Averages)</td><td class="text-center">25%</td><td class="text-center">25%</td></tr>
+                    <tr><td>Volume</td><td class="text-center">10%</td><td class="text-center">15%</td></tr>
+                    <tr><td>Sentiment (News)</td><td class="text-center">20%</td><td class="text-center">&mdash;</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted"><small>When no news/sentiment data is available for a ticker, the other indicators are re-weighted proportionally (right column). SMA always carries the highest weight because trend direction is the strongest predictor of near-term price movement.</small></p>
+    </div>
+</div>
+
+<!-- Individual Indicators -->
+<h3 class="mb-3">The Six Indicators</h3>
+
+<!-- RSI -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-speedometer me-2"></i>RSI &mdash; Relative Strength Index (14-day)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> RSI tracks the speed and magnitude of recent price changes to evaluate whether a stock is overbought or oversold. It oscillates between 0 and 100.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>RSI below 30</strong> &rarr; The stock is <em>oversold</em>. It has been sold off aggressively and may be due for a rebound. This generates a <span class="badge bg-success">Buy</span> signal.</li>
+            <li><strong>RSI between 30 and 70</strong> &rarr; Neutral territory. No strong signal. This generates a <span class="badge bg-secondary">Hold</span> signal.</li>
+            <li><strong>RSI above 70</strong> &rarr; The stock is <em>overbought</em>. It has run up quickly and may be due for a pullback. This generates a <span class="badge bg-danger">Sell</span> signal.</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> <code>100 &minus; RSI</code>. A low RSI (oversold) produces a high sub-score, meaning a better buying opportunity.</p>
+    </div>
+</div>
+
+<!-- MACD -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>MACD &mdash; Moving Average Convergence Divergence (12/26/9)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> MACD tracks momentum by comparing two moving averages (12-day fast and 26-day slow). The MACD histogram shows the difference between the MACD line and its 9-day signal line.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>Histogram positive AND MACD above signal line</strong> &rarr; Bullish momentum is accelerating. <span class="badge bg-success">Buy</span> signal.</li>
+            <li><strong>Histogram negative AND MACD below signal line</strong> &rarr; Bearish momentum. <span class="badge bg-danger">Sell</span> signal.</li>
+            <li><strong>Otherwise</strong> &rarr; Momentum is transitioning or flat. <span class="badge bg-secondary">Hold</span> signal.</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> The histogram is normalized relative to the stock price (<code>histogram / price &times; 1000</code>), then mapped to a 0&ndash;100 scale centered at 50. Positive histogram pushes the score above 50; negative pushes it below.</p>
+    </div>
+</div>
+
+<!-- Bollinger Bands -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Bollinger Bands (20-day, 2 std dev)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> Bollinger Bands create an envelope around the stock price using a 20-day moving average and two standard deviations. When price touches the outer bands, it signals potential reversal.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>Price near the lower band</strong> (within 15% of the range from bottom) &rarr; Stock may be oversold and due for a bounce. <span class="badge bg-success">Buy</span> signal.</li>
+            <li><strong>Price near the upper band</strong> (within 15% of the range from top) &rarr; Stock may be overbought. <span class="badge bg-danger">Sell</span> signal.</li>
+            <li><strong>Price in the middle</strong> &rarr; Trading within normal range. <span class="badge bg-secondary">Hold</span> signal.</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> <code>(1 &minus; position) &times; 100</code>, where position is the stock's location within the bands (0 = lower band, 1 = upper band). A price near the lower band produces a high sub-score.</p>
+    </div>
+</div>
+
+<!-- SMA -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>SMA &mdash; Simple Moving Averages (50-day &amp; 200-day)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> SMA smooths out price data to reveal the underlying trend. The 50-day SMA shows the medium-term trend, and the 200-day shows the long-term trend. Their relationship is one of the most widely followed signals in technical analysis.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>Price above SMA 50 AND SMA 50 above SMA 200</strong> (&ldquo;Golden Cross&rdquo;) &rarr; Strong uptrend. <span class="badge bg-success">Buy</span> signal.</li>
+            <li><strong>Price below SMA 50 AND SMA 50 below SMA 200</strong> (&ldquo;Death Cross&rdquo;) &rarr; Strong downtrend. <span class="badge bg-danger">Sell</span> signal.</li>
+            <li><strong>Mixed</strong> &rarr; Trend is unclear or transitioning. <span class="badge bg-secondary">Hold</span> signal.</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> Starts at 50. Price above SMA 50 adds 15 points; below subtracts 15. SMA 50 above SMA 200 (golden cross) adds 20 points; below (death cross) subtracts 20. Result: range of 15 to 85.</p>
+
+        <p><strong>Why this has the highest weight (25%):</strong> Trend is the single most important factor. Trading in the direction of the trend gives the highest probability of success.</p>
+    </div>
+</div>
+
+<!-- Volume -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-bar-chart-steps me-2"></i>Volume Ratio (vs 20-day average)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> Compares today&rsquo;s trading volume to the 20-day average. Volume confirms price moves &mdash; a price move on high volume is more significant than one on low volume.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>Ratio above 1.5x</strong> &rarr; Significantly higher volume than normal. Notable activity (institutional buying/selling). <span class="badge bg-success">Buy</span> signal (high conviction moves).</li>
+            <li><strong>Ratio between 0.5x and 1.5x</strong> &rarr; Normal volume. <span class="badge bg-secondary">Hold</span> signal.</li>
+            <li><strong>Ratio below 0.5x</strong> &rarr; Very low volume. Price moves lack conviction. <span class="badge bg-danger">Sell</span> signal (weak interest).</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> <code>ratio &times; 40 + 20</code>. At 1.0x (average volume) the sub-score is 60. Higher volume pushes toward 100; lower volume drops toward 20.</p>
+    </div>
+</div>
+
+<!-- Sentiment -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>News Sentiment (VADER, 7-day rolling)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> Headlines from yfinance and RSS feeds (CNBC, MarketWatch, BBC, etc.) are analyzed using the VADER sentiment engine, which scores each headline from &minus;1 (extremely negative) to +1 (extremely positive). The ticker&rsquo;s sentiment is a 7-day rolling average.</p>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li><strong>Score &ge; 0.15</strong> &rarr; Positive news flow. <span class="badge bg-success">Buy</span> signal.</li>
+            <li><strong>Score between &minus;0.15 and 0.15</strong> &rarr; Neutral or mixed news. <span class="badge bg-secondary">Hold</span> signal.</li>
+            <li><strong>Score &le; &minus;0.15</strong> &rarr; Negative news flow. <span class="badge bg-danger">Sell</span> signal.</li>
+        </ul>
+
+        <p><strong>Blended sentiment:</strong> Each ticker&rsquo;s final sentiment blends <strong>70% ticker-specific news</strong> (articles mentioning that stock) with <strong>30% overall market sentiment</strong> (from RSS feeds). This means even if a specific stock has no recent news, broad market sentiment still factors in.</p>
+
+        <p><strong>Sub-score formula:</strong> <code>(sentiment + 1) &times; 50</code>. This maps the &minus;1 to +1 range onto 0&ndash;100. A sentiment of 0 (neutral) maps to 50; +1 (very positive) maps to 100; &minus;1 (very negative) maps to 0.</p>
+    </div>
+</div>
+
+<!-- Radar Chart -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white">
+        <h4 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>The Radar Chart</h4>
+    </div>
+    <div class="card-body">
+        <p>On the Opportunities page, clicking a stock reveals a <strong>radar chart</strong> with six axes &mdash; one per indicator. Each axis shows the sub-score (0&ndash;100) for that indicator. A large, well-rounded shape means multiple indicators agree the stock is a good opportunity. A lopsided shape means only some indicators are favorable.</p>
+
+        <p>Use the radar chart to understand <em>why</em> a stock has its score. For example:</p>
+        <ul>
+            <li>A high RSI sub-score but low SMA sub-score might mean the stock is oversold in a downtrend &mdash; potentially a value trap.</li>
+            <li>High scores across RSI, BB, and SMA suggest a genuinely undervalued stock in an uptrend &mdash; a stronger buy signal.</li>
+        </ul>
+    </div>
+</div>
+
+<!-- Important Caveats -->
+<div class="card summary-card mb-4 border-warning">
+    <div class="card-header bg-warning bg-opacity-10">
+        <h4 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Important Caveats</h4>
+    </div>
+    <div class="card-body">
+        <ul class="mb-0">
+            <li><strong>This is not financial advice.</strong> The Opportunity Score is a technical analysis tool, not a recommendation. Always do your own research.</li>
+            <li><strong>Technical indicators look backward.</strong> They analyze historical price and volume data. They cannot predict future events like earnings surprises, regulatory changes, or macroeconomic shifts.</li>
+            <li><strong>Sentiment analysis has limitations.</strong> VADER analyzes headlines only (not full article content). It can misinterpret sarcasm, context, or domain-specific language.</li>
+            <li><strong>No single indicator is reliable alone.</strong> The power of the Opportunity Score comes from combining multiple independent signals. Always look at the radar chart breakdown, not just the final number.</li>
+            <li><strong>Scores change with each refresh.</strong> Market data is fetched on-demand when you click "Refresh All." Scores reflect the data at the time of the last refresh.</li>
+        </ul>
+    </div>
+</div>
+
+<div class="text-center mb-4">
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-primary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+    </a>
+    <a href="{% url 'opportunities' %}" class="btn btn-primary ms-2">
+        <i class="bi bi-search me-1"></i>View Opportunities
+    </a>
+</div>
+{% endblock %}

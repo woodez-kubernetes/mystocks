@@ -1,0 +1,128 @@
+<!-- Add Schedule Form -->
+<div class="mb-3 p-3 bg-light rounded" id="schedule-form-container">
+    <form hx-post="{% url 'schedule_create' %}" hx-target="#schedule-section" hx-swap="innerHTML">
+        {% csrf_token %}
+        <div class="row align-items-end g-2">
+            <div class="col-auto">
+                <label class="form-label mb-1 small fw-semibold">Time</label>
+                {{ form.time }}
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1 small fw-semibold">Days</label>
+                <div class="d-flex gap-2 align-items-center" style="height: 38px;">
+                    {% for day_field in form %}
+                        {% if day_field.name != 'time' %}
+                        <div class="form-check form-check-inline mb-0">
+                            {{ day_field.tag }}
+                            <label class="form-check-label small" for="{{ day_field.id_for_label }}">{{ day_field.label }}</label>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-lg me-1"></i>Add
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Schedule Table -->
+{% if schedules %}
+<div class="table-responsive">
+    <table class="table table-sm mb-0">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Days</th>
+                <th>Status</th>
+                <th>Last Run</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr id="schedule-row-{{ schedule.pk }}">
+                <td class="align-middle">
+                    <strong>{{ schedule.time|time:"g:i A" }}</strong>
+                </td>
+                <td class="align-middle">
+                    {% if schedule.monday %}<span class="badge bg-primary me-1">Mon</span>{% endif %}
+                    {% if schedule.tuesday %}<span class="badge bg-primary me-1">Tue</span>{% endif %}
+                    {% if schedule.wednesday %}<span class="badge bg-primary me-1">Wed</span>{% endif %}
+                    {% if schedule.thursday %}<span class="badge bg-primary me-1">Thu</span>{% endif %}
+                    {% if schedule.friday %}<span class="badge bg-primary me-1">Fri</span>{% endif %}
+                </td>
+                <td class="align-middle">
+                    {% if schedule.enabled %}
+                        <span class="badge bg-success">Enabled</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Disabled</span>
+                    {% endif %}
+                </td>
+                <td class="align-middle">
+                    {% if schedule.last_run %}
+                        {{ schedule.last_run|timesince }} ago
+                    {% else %}
+                        <span class="text-muted">Never</span>
+                    {% endif %}
+                </td>
+                <td class="align-middle text-end">
+                    <button class="btn btn-sm {% if schedule.enabled %}btn-outline-danger{% else %}btn-outline-success{% endif %}"
+                            hx-post="{% url 'schedule_toggle' schedule.pk %}"
+                            hx-target="#schedule-section"
+                            hx-swap="innerHTML">
+                        {% if schedule.enabled %}Disable{% else %}Enable{% endif %}
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#edit-schedule-{{ schedule.pk }}">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger"
+                            hx-post="{% url 'schedule_delete' schedule.pk %}"
+                            hx-target="#schedule-section"
+                            hx-swap="innerHTML"
+                            hx-confirm="Delete this schedule?">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+            <!-- Inline Edit Row -->
+            <tr class="collapse" id="edit-schedule-{{ schedule.pk }}">
+                <td colspan="5" class="bg-light">
+                    <form hx-post="{% url 'schedule_edit' schedule.pk %}" hx-target="#schedule-section" hx-swap="innerHTML">
+                        {% csrf_token %}
+                        <div class="row align-items-center g-2 p-2">
+                            <div class="col-auto">
+                                <input type="time" name="time" value="{{ schedule.time|time:'H:i' }}" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-auto d-flex gap-2 align-items-center">
+                                {% for day in schedule.DAY_FIELDS %}
+                                <div class="form-check form-check-inline mb-0">
+                                    <input class="form-check-input" type="checkbox" name="{{ day }}" id="edit-{{ schedule.pk }}-{{ day }}"
+                                           {% if day == 'monday' and schedule.monday %}checked{% endif %}
+                                           {% if day == 'tuesday' and schedule.tuesday %}checked{% endif %}
+                                           {% if day == 'wednesday' and schedule.wednesday %}checked{% endif %}
+                                           {% if day == 'thursday' and schedule.thursday %}checked{% endif %}
+                                           {% if day == 'friday' and schedule.friday %}checked{% endif %}>
+                                    <label class="form-check-label small" for="edit-{{ schedule.pk }}-{{ day }}">{{ day|truncatechars:3|title }}</label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" class="btn btn-sm btn-success">Save</button>
+                            </div>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted mb-0">No schedules configured. Use the form above to add one.</p>
+{% endif %}

@@ -1,0 +1,126 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ApexKube Capital{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="{% static 'css/custom.css' %}" rel="stylesheet">
+    {% block extra_css %}{% endblock %}
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    <!-- Top Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="{% url 'dashboard' %}">
+                <i class="bi bi-graph-up-arrow me-2"></i>ApexKube Capital
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+        </div>
+    </nav>
+
+    <div class="d-flex" style="margin-top: 56px;">
+        <!-- Sidebar -->
+        <nav id="sidebar" class="offcanvas-lg offcanvas-start sidebar bg-dark text-white" tabindex="-1">
+            <div class="offcanvas-header d-lg-none">
+                <h5 class="offcanvas-title text-white">Menu</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+            </div>
+            <div class="offcanvas-body d-flex flex-column p-0">
+                <ul class="nav nav-pills flex-column px-2 py-3">
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+                            <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'portfolio_list' or request.resolver_match.url_name == 'portfolio_detail' %}active{% endif %}" href="{% url 'portfolio_list' %}">
+                            <i class="bi bi-folder me-2"></i>Portfolios
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'opportunities' %}active{% endif %}" href="{% url 'opportunities' %}">
+                            <i class="bi bi-search me-2"></i>Opportunities
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'watchlist' %}active{% endif %}" href="{% url 'watchlist' %}">
+                            <i class="bi bi-eye me-2"></i>Watchlist
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'news_feed' %}active{% endif %}" href="{% url 'news_feed' %}">
+                            <i class="bi bi-newspaper me-2"></i>News
+                        </a>
+                    </li>
+                </ul>
+                <hr class="text-secondary mx-3">
+                <ul class="nav nav-pills flex-column px-2 mb-auto">
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'metrics_info' %}active{% endif %}" href="{% url 'metrics_info' %}">
+                            <i class="bi bi-info-circle me-2"></i>How Metrics Work
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'settings' %}active{% endif %}" href="{% url 'settings' %}">
+                            <i class="bi bi-gear me-2"></i>Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link text-white btn btn-link w-100 text-start"
+                                hx-post="{% url 'send_email_report' %}"
+                                hx-target="#report-status"
+                                hx-swap="innerHTML"
+                                hx-indicator="#report-spinner">
+                            <i class="bi bi-envelope me-2"></i>Email Report
+                            <span id="report-spinner" class="spinner-border spinner-border-sm ms-2 htmx-indicator" role="status"></span>
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white {% if request.resolver_match.url_name == 'report_audit_log' %}active{% endif %}" href="{% url 'report_audit_log' %}">
+                            <i class="bi bi-journal-text me-2"></i>Audit Log
+                        </a>
+                    </li>
+                </ul>
+                <hr class="text-secondary mx-3">
+                <div class="px-3 pb-3">
+                    <small class="text-secondary d-block mb-2"><i class="bi bi-person-circle me-1"></i>{{ user.username }}</small>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-secondary btn-sm w-100">
+                            <i class="bi bi-box-arrow-left me-1"></i>Logout
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Report Status Notifications -->
+        <div id="report-status" style="position:fixed; top:70px; right:20px; z-index:1050; max-width:400px;"></div>
+
+        <!-- Main Content -->
+        <main class="flex-grow-1 p-4 main-content">
+            {% if messages %}
+            <div class="mb-3">
+                {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

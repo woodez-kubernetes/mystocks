@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}News - ApexKube Capital{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><i class="bi bi-newspaper me-2"></i>News Feed</h2>
+    <button class="btn btn-outline-primary"
+            hx-post="{% url 'refresh_all' %}"
+            hx-indicator="#refresh-news-spinner">
+        <span id="refresh-news-spinner" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+    </button>
+</div>
+
+<!-- Category Filter Tabs -->
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link {% if category == 'all' %}active{% endif %}" href="{% url 'news_feed' %}">
+            <i class="bi bi-grid me-1"></i>All
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if category == 'stock' %}active{% endif %}" href="{% url 'news_feed' %}?category=stock">
+            <i class="bi bi-graph-up me-1"></i>Stock / Market
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if category == 'geopolitical' %}active{% endif %}" href="{% url 'news_feed' %}?category=geopolitical">
+            <i class="bi bi-globe me-1"></i>Geopolitical
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if category == 'ticker' %}active{% endif %}" href="{% url 'news_feed' %}?category=ticker">
+            <i class="bi bi-tag me-1"></i>Per-Ticker
+        </a>
+    </li>
+</ul>
+
+{% if articles %}
+<div class="list-group">
+    {% for article in articles %}
+    <a href="{{ article.url }}" target="_blank" rel="noopener" class="list-group-item list-group-item-action">
+        <div class="d-flex justify-content-between align-items-start">
+            <div class="me-3">
+                <div class="mb-1">
+                    {% if article.ticker %}
+                        <span class="badge bg-primary me-1">{{ article.ticker.symbol }}</span>
+                    {% else %}
+                        <span class="badge bg-info me-1">General</span>
+                    {% endif %}
+                    {% if article.feed_source %}
+                        <span class="badge border text-muted me-1" style="font-size: 0.7em;">{{ article.feed_source.name }}</span>
+                    {% endif %}
+                    <span class="fw-semibold">{{ article.title }}</span>
+                </div>
+                <small class="text-muted">
+                    {% if article.source %}{{ article.source }} &middot; {% endif %}
+                    {{ article.published_at|timesince }} ago
+                </small>
+            </div>
+            <div class="text-end flex-shrink-0">
+                {% if article.sentiment_score is not None %}
+                    <span class="badge {% if article.sentiment_label == 'positive' %}bg-success{% elif article.sentiment_label == 'negative' %}bg-danger{% else %}bg-secondary{% endif %}">
+                        {% if article.sentiment_label == 'positive' %}Positive
+                        {% elif article.sentiment_label == 'negative' %}Negative
+                        {% else %}Neutral{% endif %}
+                    </span>
+                    <br><small class="text-muted">{{ article.sentiment_score|floatformat:2 }}</small>
+                {% endif %}
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+    <i class="bi bi-newspaper fs-1 d-block mb-3"></i>
+    <p class="mb-2">No news articles yet.</p>
+    <p>Click "Refresh All" to fetch the latest news from RSS feeds and portfolio tickers.</p>
+</div>
+{% endif %}
+{% endblock %}

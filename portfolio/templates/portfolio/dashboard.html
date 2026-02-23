@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - MyStocks{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Dashboard</h2>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-wallet2 fs-4 text-primary me-2"></i>
+                    <span class="text-muted">Portfolios</span>
+                </div>
+                <h3 class="mb-0">{{ portfolio_count }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-tags fs-4 text-success me-2"></i>
+                    <span class="text-muted">Tickers Tracked</span>
+                </div>
+                <h3 class="mb-0">{{ ticker_count }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card summary-card">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-receipt fs-4 text-info me-2"></i>
+                    <span class="text-muted">Total Lots</span>
+                </div>
+                <h3 class="mb-0">{{ lot_count }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Portfolios List -->
+<div class="card summary-card">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-folder me-2"></i>Your Portfolios</h5>
+    </div>
+    <div class="card-body">
+        {% if portfolios %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Name</th>
+                        <th class="text-end">Holdings</th>
+                        <th class="text-end">Total Cost</th>
+                        <th class="text-end">Market Value</th>
+                        <th class="text-end">Gain/Loss</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in portfolios %}
+                    <tr class="cursor-pointer" onclick="window.location='{% url 'portfolio_detail' p.pk %}'">
+                        <td class="fw-semibold">
+                            <a href="{% url 'portfolio_detail' p.pk %}" class="text-decoration-none text-dark">{{ p.name }}</a>
+                        </td>
+                        <td class="text-end">{{ p.lots.count }} lots</td>
+                        <td class="text-end">${{ p.total_cost|floatformat:2 }}</td>
+                        <td class="text-end">
+                            {% if p.total_value %}
+                                ${{ p.total_value|floatformat:2 }}
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if p.total_gain_loss is not None %}
+                                <span class="{% if p.total_gain_loss >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                                    {% if p.total_gain_loss >= 0 %}+{% endif %}${{ p.total_gain_loss|floatformat:2 }}
+                                    {% if p.total_gain_loss_pct is not None %}
+                                        ({% if p.total_gain_loss_pct >= 0 %}+{% endif %}{{ p.total_gain_loss_pct|floatformat:1 }}%)
+                                    {% endif %}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted">{{ p.created_at|date:"M d, Y" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-folder-plus fs-1 d-block mb-3"></i>
+            <p class="mb-1">No portfolios yet.</p>
+            <a href="{% url 'portfolio_list' %}" class="btn btn-primary btn-sm">
+                <i class="bi bi-plus-lg me-1"></i>Create one
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

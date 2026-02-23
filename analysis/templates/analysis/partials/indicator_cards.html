@@ -1,0 +1,117 @@
+{% if indicators %}
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Technical Indicators</h5>
+        <div>
+            <span class="badge fs-6 {% if indicators.opportunity_score >= 70 %}bg-success{% elif indicators.opportunity_score >= 40 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                Score: {{ indicators.opportunity_score }}/100
+            </span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <!-- RSI -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">RSI (14)</small>
+                        <h5 class="mb-1">{% if indicators.rsi is not None %}{{ indicators.rsi|floatformat:1 }}{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.rsi_signal == 'buy' %}bg-success{% elif indicators.rsi_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.rsi_signal == 'buy' %}Oversold{% elif indicators.rsi_signal == 'sell' %}Overbought{% else %}Neutral{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            {% if indicators.rsi is not None %}
+                                {% if indicators.rsi < 30 %}Below 30{% elif indicators.rsi > 70 %}Above 70{% else %}30-70 range{% endif %}
+                            {% endif %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MACD -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">MACD</small>
+                        <h5 class="mb-1">{% if indicators.macd_histogram is not None %}{{ indicators.macd_histogram|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.macd_signal == 'buy' %}bg-success{% elif indicators.macd_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.macd_signal == 'buy' %}Bullish{% elif indicators.macd_signal == 'sell' %}Bearish{% else %}Neutral{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            {% if indicators.macd is not None %}
+                                MACD: {{ indicators.macd|floatformat:2 }}
+                            {% endif %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bollinger Bands -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Bollinger Bands</small>
+                        <h5 class="mb-1">{% if indicators.bb_middle is not None %}${{ indicators.bb_middle|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.bb_signal == 'buy' %}bg-success{% elif indicators.bb_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.bb_signal == 'buy' %}Near Lower{% elif indicators.bb_signal == 'sell' %}Near Upper{% else %}Mid Band{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            {% if indicators.bb_lower is not None %}
+                                ${{ indicators.bb_lower|floatformat:0 }} - ${{ indicators.bb_upper|floatformat:0 }}
+                            {% endif %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Moving Averages -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Moving Avg</small>
+                        <h5 class="mb-1">{% if indicators.sma_50 is not None %}${{ indicators.sma_50|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.sma_signal == 'buy' %}bg-success{% elif indicators.sma_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.sma_signal == 'buy' %}Bullish{% elif indicators.sma_signal == 'sell' %}Bearish{% else %}Neutral{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            SMA50{% if indicators.sma_200 is not None %} / SMA200: ${{ indicators.sma_200|floatformat:0 }}{% endif %}
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Volume -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Volume</small>
+                        <h5 class="mb-1">{% if indicators.volume_ratio is not None %}{{ indicators.volume_ratio|floatformat:1 }}x{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.volume_signal == 'buy' %}bg-success{% elif indicators.volume_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.volume_signal == 'buy' %}High Vol{% elif indicators.volume_signal == 'sell' %}Low Vol{% else %}Normal{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            vs 20-day avg
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sentiment -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Sentiment</small>
+                        <h5 class="mb-1">{% if indicators.sentiment_score is not None %}{% if indicators.sentiment_score >= 0 %}+{% endif %}{{ indicators.sentiment_score|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        <span class="badge {% if indicators.sentiment_signal == 'buy' %}bg-success{% elif indicators.sentiment_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                            {% if indicators.sentiment_signal == 'buy' %}Positive{% elif indicators.sentiment_signal == 'sell' %}Negative{% else %}Neutral{% endif %}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            7-day avg
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Settings - ApexKube Capital{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-gear me-2"></i>Settings</h2>
+
+<div class="row g-4">
+    <!-- Email Report Schedules -->
+    <div class="col-12">
+        <div class="card summary-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Email Report Schedules</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Schedule automatic email reports on weekdays. Reports refresh all data before sending.</p>
+                <div id="schedule-section">
+                    {% include "portfolio/partials/schedule_list.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RSS Feeds -->
+    <div class="col-12">
+        <div class="card summary-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-rss me-2"></i>RSS News Feeds</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">Manage RSS feeds for stock market and geopolitical news. Articles are fetched during data refresh and included in sentiment analysis.</p>
+                <div id="feed-list">
+                    {% include "market/partials/feed_list.html" %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sentiment Analysis -->
+    <div class="col-lg-6">
+        <div class="card summary-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Sentiment Analysis</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Current Engine</label>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-success">Active</span>
+                        <span>VADER (Local)</span>
+                    </div>
+                    <small class="text-muted">Free, fast, no API key required. Analyzes news headlines locally.</small>
+                </div>
+                <hr>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Sentiment Blending</label>
+                    <div class="text-muted">
+                        <small>Ticker scores blend <strong>70% ticker-specific</strong> and <strong>30% market-wide</strong> sentiment from RSS feeds.</small>
+                    </div>
+                </div>
+                <hr>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">OpenAI API Key <span class="badge bg-secondary">Optional</span></label>
+                    <input type="password" class="form-control" placeholder="sk-..." disabled>
+                    <small class="text-muted">Coming soon: OpenAI integration for enhanced sentiment analysis.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Refresh -->
+    <div class="col-lg-6">
+        <div class="card summary-card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-arrow-clockwise me-2"></i>Data Refresh</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Refresh Data</label>
+                    <p class="text-muted mb-2">Manually refresh prices, news, RSS feeds, and indicators for all portfolio tickers.</p>
+                    <button class="btn btn-primary"
+                            hx-post="{% url 'refresh_all' %}"
+                            hx-indicator="#settings-refresh-spinner">
+                        <span id="settings-refresh-spinner" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh All Tickers
+                    </button>
+                </div>
+                <hr>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">About</label>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr>
+                                <td class="text-muted">Data Source</td>
+                                <td>yfinance + RSS Feeds</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Sentiment Engine</td>
+                                <td>VADER</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Technical Indicators</td>
+                                <td>RSI, MACD, BB, SMA, Volume</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">Database</td>
+                                <td>SQLite</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

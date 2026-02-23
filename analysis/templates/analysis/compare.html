@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Compare Tickers - ApexKube Capital{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-arrows-angle-expand me-2"></i>Compare Tickers</h2>
+
+<!-- Ticker Selector -->
+<div class="card summary-card mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small text-muted mb-1">Select up to 3 tickers:</label>
+                <div class="d-flex gap-2">
+                    <input type="text" name="s1" class="form-control" placeholder="e.g. AAPL"
+                           value="{{ symbols.0|default:'' }}" style="max-width: 120px; text-transform: uppercase;">
+                    <input type="text" name="s2" class="form-control" placeholder="e.g. MSFT"
+                           value="{{ symbols.1|default:'' }}" style="max-width: 120px; text-transform: uppercase;">
+                    <input type="text" name="s3" class="form-control" placeholder="e.g. GOOGL"
+                           value="{{ symbols.2|default:'' }}" style="max-width: 120px; text-transform: uppercase;">
+                </div>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary" id="compare-btn">
+                    <i class="bi bi-arrows-angle-expand me-1"></i>Compare
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if tickers_data %}
+<!-- Overlaid Radar Chart -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-radar me-2"></i>Score Breakdown</h5>
+    </div>
+    <div class="card-body">
+        <div style="position: relative; height: 300px; max-width: 500px; margin: 0 auto;">
+            <canvas id="compareRadar"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Side-by-Side Comparison -->
+<div class="row g-3">
+    {% for td in tickers_data %}
+    <div class="col-md-{{ col_size }}">
+        <div class="card summary-card h-100">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <div>
+                    <a href="{% url 'ticker_detail' td.ticker.symbol %}" class="fw-bold text-decoration-none fs-5">
+                        {{ td.ticker.symbol }}
+                    </a>
+                    {% if td.ticker.company_name %}
+                        <small class="text-muted d-block">{{ td.ticker.company_name }}</small>
+                    {% endif %}
+                </div>
+                {% if td.indicators %}
+                    <span class="badge fs-6 {% if td.indicators.opportunity_score >= 70 %}bg-success{% elif td.indicators.opportunity_score >= 40 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                        {{ td.indicators.opportunity_score }}
+                    </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <!-- Price -->
+                <div class="mb-3">
+                    <small class="text-muted d-block">Price</small>
+                    {% if td.ticker.last_price %}
+                        <span class="fs-4 fw-bold">${{ td.ticker.last_price|floatformat:2 }}</span>
+                        {% if td.ticker.day_change_pct is not None %}
+                            <span class="ms-2 {% if td.ticker.day_change >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                                {% if td.ticker.day_change >= 0 %}+{% endif %}{{ td.ticker.day_change_pct|floatformat:2 }}%
+                            </span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">--</span>
+                    {% endif %}
+                </div>
+
+                <!-- Key Stats -->
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td class="text-muted">Sector</td>
+                            <td class="text-end">{{ td.ticker.sector|default:"--" }}</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">P/E Ratio</td>
+                            <td class="text-end">{{ td.ticker.pe_ratio|floatformat:2|default:"--" }}</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">52W High</td>
+                            <td class="text-end">{% if td.ticker.week_52_high %}${{ td.ticker.week_52_high|floatformat:2 }}{% else %}--{% endif %}</td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">52W Low</td>
+                            <td class="text-end">{% if td.ticker.week_52_low %}${{ td.ticker.week_52_low|floatformat:2 }}{% else %}--{% endif %}</td>
+                        </tr>
+                        {% if td.indicators %}
+                        <tr><td colspan="2"><hr class="my-1"></td></tr>
+                        <tr>
+                            <td class="text-muted">RSI</td>
+                            <td class="text-end">
+                                {{ td.indicators.rsi|floatformat:1|default:"--" }}
+                                <span class="badge {% if td.indicators.rsi_signal == 'buy' %}bg-success{% elif td.indicators.rsi_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %} ms-1">
+                                    {{ td.indicators.rsi_signal }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">MACD</td>
+                            <td class="text-end">
+                                <span class="badge {% if td.indicators.macd_signal == 'buy' %}bg-success{% elif td.indicators.macd_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                    {{ td.indicators.macd_signal }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Bollinger</td>
+                            <td class="text-end">
+                                <span class="badge {% if td.indicators.bb_signal == 'buy' %}bg-success{% elif td.indicators.bb_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                    {{ td.indicators.bb_signal }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">SMA</td>
+                            <td class="text-end">
+                                <span class="badge {% if td.indicators.sma_signal == 'buy' %}bg-success{% elif td.indicators.sma_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                    {{ td.indicators.sma_signal }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Sentiment</td>
+                            <td class="text-end">
+                                {{ td.indicators.sentiment_score|floatformat:3|default:"--" }}
+                                <span class="badge {% if td.indicators.sentiment_signal == 'buy' %}bg-success{% elif td.indicators.sentiment_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %} ms-1">
+                                    {{ td.indicators.sentiment_signal }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% elif symbols %}
+<div class="card summary-card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-exclamation-circle fs-1 d-block mb-3"></i>
+        <h5>No matching tickers found</h5>
+        <p class="mb-0">Make sure the ticker symbols are correct and exist in your data.</p>
+    </div>
+</div>
+{% else %}
+<div class="card summary-card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-arrows-angle-expand fs-1 d-block mb-3"></i>
+        <h5>Compare tickers side by side</h5>
+        <p class="mb-0">Enter 2-3 ticker symbols above to compare their metrics and scores.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if tickers_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    var symbols = [{% for td in tickers_data %}'{{ td.ticker.symbol }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+    var colors = ['#0d6efd', '#fd7e14', '#6f42c1'];
+    var bgColors = ['rgba(13,110,253,0.15)', 'rgba(253,126,20,0.15)', 'rgba(111,66,193,0.15)'];
+
+    var datasets = [];
+    var loadedCount = 0;
+    var radarLabels = null;
+
+    symbols.forEach(function(symbol, idx) {
+        fetch('{% url "radar_data" "PLACEHOLDER" %}'.replace('PLACEHOLDER', symbol))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.labels && data.labels.length) {
+                    if (!radarLabels) radarLabels = data.labels;
+                    datasets.push({
+                        label: symbol,
+                        data: data.scores,
+                        borderColor: colors[idx],
+                        backgroundColor: bgColors[idx],
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointBackgroundColor: colors[idx],
+                    });
+                }
+                loadedCount++;
+                if (loadedCount === symbols.length && radarLabels) {
+                    var canvas = document.getElementById('compareRadar');
+                    new Chart(canvas.getContext('2d'), {
+                        type: 'radar',
+                        data: { labels: radarLabels, datasets: datasets },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                r: {
+                                    beginAtZero: true,
+                                    max: 100,
+                                    ticks: { stepSize: 25, font: { size: 10 } },
+                                    pointLabels: { font: { size: 12 } },
+                                }
+                            },
+                            plugins: {
+                                legend: { position: 'top' },
+                            }
+                        }
+                    });
+                }
+            });
+    });
+
+    // Handle form submission: combine s1,s2,s3 into symbols param
+    document.getElementById('compare-btn').addEventListener('click', function(e) {
+        e.preventDefault();
+        var form = this.closest('form');
+        var s1 = form.querySelector('[name="s1"]').value.trim();
+        var s2 = form.querySelector('[name="s2"]').value.trim();
+        var s3 = form.querySelector('[name="s3"]').value.trim();
+        var syms = [s1, s2, s3].filter(function(s) { return s; });
+        if (syms.length > 0) {
+            window.location.href = '{% url "compare" %}?symbols=' + syms.join(',');
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

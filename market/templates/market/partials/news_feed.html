@@ -1,0 +1,39 @@
+{% if news_articles %}
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-newspaper me-2"></i>Recent News</h5>
+        {% if aggregate_sentiment is not None %}
+            <span class="badge {% if aggregate_sentiment >= 0.05 %}bg-success{% elif aggregate_sentiment <= -0.05 %}bg-danger{% else %}bg-secondary{% endif %}">
+                Sentiment: {% if aggregate_sentiment >= 0 %}+{% endif %}{{ aggregate_sentiment|floatformat:2 }}
+            </span>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+            {% for article in news_articles %}
+            <a href="{{ article.url }}" target="_blank" rel="noopener" class="list-group-item list-group-item-action">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="me-3">
+                        <p class="mb-1 fw-semibold">{{ article.title }}</p>
+                        <small class="text-muted">
+                            {% if article.source %}{{ article.source }} &middot; {% endif %}
+                            {{ article.published_at|timesince }} ago
+                        </small>
+                    </div>
+                    <div class="text-end flex-shrink-0">
+                        {% if article.sentiment_score is not None %}
+                            <span class="badge {% if article.sentiment_label == 'positive' %}bg-success{% elif article.sentiment_label == 'negative' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {% if article.sentiment_label == 'positive' %}Positive
+                                {% elif article.sentiment_label == 'negative' %}Negative
+                                {% else %}Neutral{% endif %}
+                            </span>
+                            <br><small class="text-muted">{{ article.sentiment_score|floatformat:2 }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}

@@ -1,0 +1,45 @@
+<div class="modal-header">
+    <h5 class="modal-title">{{ title }}</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<form method="post"
+      {% if lot %}
+          action="{% url 'lot_edit' lot.pk %}"
+          hx-post="{% url 'lot_edit' lot.pk %}"
+      {% else %}
+          action="{% url 'lot_create' portfolio.pk %}"
+          hx-post="{% url 'lot_create' portfolio.pk %}"
+      {% endif %}
+      hx-target="#holdings-container"
+      hx-swap="innerHTML">
+    {% csrf_token %}
+    <div class="modal-body">
+        {% for field in form %}
+        <div class="mb-3">
+            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+                <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
+            {% if field.errors %}
+                {% for error in field.errors %}
+                <div class="invalid-feedback d-block">{{ error }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        <!-- Ticker suggestions datalist -->
+        <datalist id="ticker-suggestions">
+            {% for symbol in tickers %}
+            <option value="{{ symbol }}">
+            {% endfor %}
+        </datalist>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">
+            {% if lot %}<i class="bi bi-check-lg me-1"></i>Save Changes{% else %}<i class="bi bi-plus-lg me-1"></i>Add Lot{% endif %}
+        </button>
+    </div>
+</form>

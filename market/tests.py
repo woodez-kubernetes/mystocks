@@ -1,0 +1,767 @@
+from datetime import date
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
+
+from django.contrib.auth.models import User
+from django.test import Client, TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from market.models import NewsArticle, PriceHistory, RSSFeedSource
+from market.services import NewsService, RSSNewsService, StockDataService
+from portfolio.models import Lot, Portfolio, Ticker
+
+
+class LoggedInTestCase(TestCase):
+    """Base test class that provides an authenticated client."""
+    def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
+        self.client = Client()
+        self.client.force_login(self.user)
+
+
+class PriceHistoryModelTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL', last_price=Decimal('178.50'))
+
+    def test_create_price_history(self):
+        ph = PriceHistory.objects.create(
+            ticker=self.ticker,
+            date=date(2024, 1, 15),
+            open=Decimal('175.00'),
+            high=Decimal('180.00'),
+            low=Decimal('174.00'),
+            close=Decimal('178.50'),
+            volume=58000000,
+        )
+        self.assertEqual(str(ph), 'AAPL 2024-01-15 close=178.50')
+
+    def test_unique_together(self):
+        PriceHistory.objects.create(
+            ticker=self.ticker, date=date(2024, 1, 15),
+            open=Decimal('175'), high=Decimal('180'), low=Decimal('174'),
+            close=Decimal('178.50'), volume=58000000,
+        )
+        with self.assertRaises(Exception):
+            PriceHistory.objects.create(
+                ticker=self.ticker, date=date(2024, 1, 15),
+                open=Decimal('175'), high=Decimal('180'), low=Decimal('174'),
+                close=Decimal('179.00'), volume=58000000,
+            )
+
+    def test_ordering(self):
+        PriceHistory.objects.create(
+            ticker=self.ticker, date=date(2024, 1, 10),
+            open=Decimal('170'), high=Decimal('175'), low=Decimal('169'),
+            close=Decimal('174'), volume=50000000,
+        )
+        PriceHistory.objects.create(
+            ticker=self.ticker, date=date(2024, 1, 15),
+            open=Decimal('175'), high=Decimal('180'), low=Decimal('174'),
+            close=Decimal('178'), volume=58000000,
+        )
+        prices = list(PriceHistory.objects.filter(ticker=self.ticker))
+        self.assertEqual(prices[0].date, date(2024, 1, 15))  # newest first
+
+
+def _mock_yf_ticker(info=None, history_df=None):
+    """Create a mock yfinance Ticker object."""
+    mock = MagicMock()
+    mock.info = info or {}
+    if history_df is not None:
+        mock.history.return_value = history_df
+    else:
+        import pandas as pd
+        mock.history.return_value = pd.DataFrame()
+    mock.fast_info = MagicMock()
+    mock.fast_info.last_price = None
+    mock.fast_info.previous_close = None
+    mock.fast_info.last_volume = None
+    return mock
+
+
+class StockDataServiceTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    @patch('market.services.yf.Ticker')
+    def test_get_quote(self, mock_yf):
+        mock_yf.return_value = _mock_yf_ticker(info={
+            'regularMarketPrice': 178.50,
+            'regularMarketPreviousClose': 176.00,
+            'regularMarketVolume': 58000000,
+        })
+        quote = StockDataService.get_quote('AAPL')
+        self.assertIsNotNone(quote)
+        self.assertEqual(quote['price'], Decimal('178.50'))
+        self.assertEqual(quote['prev_close'], Decimal('176.00'))
+        self.assertIsNotNone(quote['day_change'])
+
+    @patch('market.services.yf.Ticker')
+    def test_get_quote_failure_returns_none(self, mock_yf):
+        mock_yf.side_effect = Exception('API error')
+        quote = StockDataService.get_quote('BAD')
+        self.assertIsNone(quote)
+
+    @patch('market.services.yf.Ticker')
+    def test_get_history(self, mock_yf):
+        import pandas as pd
+        import numpy as np
+        dates = pd.date_range('2024-01-01', periods=5, freq='B')
+        df = pd.DataFrame({
+            'Open': [170.0, 171.0, 172.0, 173.0, 174.0],
+            'High': [175.0, 176.0, 177.0, 178.0, 179.0],
+            'Low': [169.0, 170.0, 171.0, 172.0, 173.0],
+            'Close': [174.0, 175.0, 176.0, 177.0, 178.0],
+            'Volume': [50000000] * 5,
+        }, index=dates)
+        mock_yf.return_value = _mock_yf_ticker(history_df=df)
+
+        history = StockDataService.get_history('AAPL', period='1mo')
+        self.assertEqual(len(history), 5)
+        self.assertEqual(history[0]['close'], Decimal('174.00'))
+
+    @patch('market.services.yf.Ticker')
+    def test_get_company_info(self, mock_yf):
+        mock_yf.return_value = _mock_yf_ticker(info={
+            'shortName': 'Apple Inc.',
+            'sector': 'Technology',
+            'marketCap': 2800000000000,
+            'trailingPE': 28.5,
+            'dividendYield': 0.0055,
+            'fiftyTwoWeekHigh': 199.62,
+            'fiftyTwoWeekLow': 124.17,
+            'averageVolume': 55000000,
+        })
+        info = StockDataService.get_company_info('AAPL')
+        self.assertEqual(info['company_name'], 'Apple Inc.')
+        self.assertEqual(info['sector'], 'Technology')
+        self.assertEqual(info['market_cap'], 2800000000000)
+
+    @patch('market.services.yf.Ticker')
+    def test_refresh_ticker(self, mock_yf):
+        import pandas as pd
+        dates = pd.date_range('2024-01-01', periods=3, freq='B')
+        df = pd.DataFrame({
+            'Open': [170.0, 171.0, 172.0],
+            'High': [175.0, 176.0, 177.0],
+            'Low': [169.0, 170.0, 171.0],
+            'Close': [174.0, 175.0, 176.0],
+            'Volume': [50000000] * 3,
+        }, index=dates)
+        mock_yf.return_value = _mock_yf_ticker(
+            info={
+                'regularMarketPrice': 178.50,
+                'regularMarketPreviousClose': 176.00,
+                'shortName': 'Apple Inc.',
+                'sector': 'Technology',
+                'marketCap': 2800000000000,
+            },
+            history_df=df,
+        )
+
+        StockDataService.refresh_ticker(self.ticker)
+        self.ticker.refresh_from_db()
+        self.assertEqual(self.ticker.last_price, Decimal('178.50'))
+        self.assertEqual(self.ticker.company_name, 'Apple Inc.')
+        self.assertIsNotNone(self.ticker.last_updated)
+        self.assertEqual(PriceHistory.objects.filter(ticker=self.ticker).count(), 3)
+
+
+class TickerDetailViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('178.50'),
+            last_updated=timezone.now(),
+        )
+        PriceHistory.objects.create(
+            ticker=self.ticker, date=date(2024, 1, 15),
+            open=Decimal('175'), high=Decimal('180'), low=Decimal('174'),
+            close=Decimal('178.50'), volume=58000000,
+        )
+
+    def test_detail_page_loads(self):
+        response = self.client.get(reverse('ticker_detail', args=['AAPL']))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'AAPL')
+        self.assertContains(response, 'Apple Inc.')
+
+    def test_detail_case_insensitive(self):
+        response = self.client.get(reverse('ticker_detail', args=['aapl']))
+        self.assertEqual(response.status_code, 200)
+
+    def test_detail_404(self):
+        response = self.client.get(reverse('ticker_detail', args=['ZZZZ']))
+        self.assertEqual(response.status_code, 404)
+
+    def test_shows_holdings(self):
+        portfolio = Portfolio.objects.create(name='Test')
+        Lot.objects.create(
+            portfolio=portfolio, ticker=self.ticker,
+            shares=Decimal('100'), cost_basis=Decimal('150'),
+            purchase_date=date(2024, 1, 1),
+        )
+        response = self.client.get(reverse('ticker_detail', args=['AAPL']))
+        self.assertContains(response, 'Test')
+        self.assertContains(response, '100')
+
+
+class ChartDataViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+        # Create enough data points for '5d' period (threshold: 5 * 0.5 = 2.5)
+        for i in range(5):
+            PriceHistory.objects.create(
+                ticker=self.ticker,
+                date=date(2024, 1, 10 + i),
+                open=Decimal('170'), high=Decimal('175'), low=Decimal('169'),
+                close=Decimal(str(170 + i)),
+                volume=50000000,
+            )
+
+    def test_chart_data_returns_json(self):
+        response = self.client.get(
+            reverse('chart_data', args=['AAPL']), {'period': '5d'}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('labels', data)
+        self.assertIn('prices', data)
+        self.assertEqual(len(data['labels']), 5)
+
+
+class RefreshViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_refresh_requires_post(self):
+        response = self.client.get(reverse('refresh_ticker', args=['AAPL']))
+        self.assertEqual(response.status_code, 405)
+
+    @patch('market.views.StockDataService.refresh_ticker')
+    def test_refresh_single_ticker(self, mock_refresh):
+        response = self.client.post(reverse('refresh_ticker', args=['AAPL']))
+        self.assertEqual(response.status_code, 200)
+        mock_refresh.assert_called_once()
+
+    def test_refresh_all_requires_post(self):
+        response = self.client.get(reverse('refresh_all'))
+        self.assertEqual(response.status_code, 405)
+
+    @patch('market.views.StockDataService.refresh_all')
+    def test_refresh_all(self, mock_refresh_all):
+        mock_refresh_all.return_value = [('AAPL', True)]
+        response = self.client.post(reverse('refresh_all'))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['refreshed'], 1)
+
+
+class NewsArticleModelTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_create_article(self):
+        article = NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Apple reports record earnings',
+            url='https://example.com/article1',
+            source='Reuters',
+            published_at=timezone.now(),
+        )
+        self.assertIn('AAPL', str(article))
+        self.assertIn('Apple reports', str(article))
+
+    def test_unique_together(self):
+        NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Article 1',
+            url='https://example.com/same-url',
+            published_at=timezone.now(),
+        )
+        with self.assertRaises(Exception):
+            NewsArticle.objects.create(
+                ticker=self.ticker,
+                title='Article 2',
+                url='https://example.com/same-url',
+                published_at=timezone.now(),
+            )
+
+    def test_ordering(self):
+        from datetime import timedelta
+        now = timezone.now()
+        NewsArticle.objects.create(
+            ticker=self.ticker, title='Old', url='https://example.com/old',
+            published_at=now - timedelta(days=2),
+        )
+        NewsArticle.objects.create(
+            ticker=self.ticker, title='New', url='https://example.com/new',
+            published_at=now,
+        )
+        articles = list(NewsArticle.objects.filter(ticker=self.ticker))
+        self.assertEqual(articles[0].title, 'New')
+
+
+class NewsServiceTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_analyze_sentiment_positive(self):
+        article = NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Apple stock surges to record high after amazing earnings beat',
+            url='https://example.com/positive',
+            published_at=timezone.now(),
+        )
+        score, label = NewsService.analyze_sentiment(article)
+        self.assertIsNotNone(score)
+        self.assertEqual(label, 'positive')
+        self.assertGreater(float(score), 0)
+
+    def test_analyze_sentiment_negative(self):
+        article = NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Apple stock crashes amid terrible losses and horrible outlook',
+            url='https://example.com/negative',
+            published_at=timezone.now(),
+        )
+        score, label = NewsService.analyze_sentiment(article)
+        self.assertEqual(label, 'negative')
+        self.assertLess(float(score), 0)
+
+    def test_analyze_sentiment_neutral(self):
+        article = NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Apple to hold annual meeting next week',
+            url='https://example.com/neutral',
+            published_at=timezone.now(),
+        )
+        score, label = NewsService.analyze_sentiment(article)
+        self.assertIn(label, ('neutral', 'positive', 'negative'))
+
+    def test_aggregate_sentiment(self):
+        now = timezone.now()
+        for i in range(3):
+            a = NewsArticle.objects.create(
+                ticker=self.ticker,
+                title='Great positive amazing news',
+                url=f'https://example.com/art{i}',
+                published_at=now,
+                sentiment_score=Decimal('0.500'),
+                sentiment_label='positive',
+            )
+        avg = NewsService.get_aggregate_sentiment(self.ticker, days=7)
+        self.assertIsNotNone(avg)
+        self.assertAlmostEqual(float(avg), 0.5, places=1)
+
+    def test_aggregate_sentiment_no_articles(self):
+        avg = NewsService.get_aggregate_sentiment(self.ticker, days=7)
+        self.assertIsNone(avg)
+
+    @patch('market.services.yf.Ticker')
+    def test_fetch_news(self, mock_yf):
+        import time
+        mock_ticker = MagicMock()
+        mock_ticker.news = [
+            {
+                'title': 'Apple beats expectations',
+                'link': 'https://example.com/news1',
+                'publisher': 'Reuters',
+                'providerPublishTime': int(time.time()),
+            },
+            {
+                'title': 'iPhone sales strong',
+                'link': 'https://example.com/news2',
+                'publisher': 'Bloomberg',
+                'providerPublishTime': int(time.time()),
+            },
+        ]
+        mock_yf.return_value = mock_ticker
+        articles = NewsService.fetch_news(self.ticker)
+        self.assertEqual(len(articles), 2)
+        self.assertEqual(NewsArticle.objects.filter(ticker=self.ticker).count(), 2)
+
+    @patch('market.services.yf.Ticker')
+    def test_fetch_news_skips_duplicates(self, mock_yf):
+        import time
+        NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Existing',
+            url='https://example.com/existing',
+            published_at=timezone.now(),
+        )
+        mock_ticker = MagicMock()
+        mock_ticker.news = [
+            {
+                'title': 'Existing article',
+                'link': 'https://example.com/existing',
+                'publisher': 'Reuters',
+                'providerPublishTime': int(time.time()),
+            },
+        ]
+        mock_yf.return_value = mock_ticker
+        articles = NewsService.fetch_news(self.ticker)
+        self.assertEqual(len(articles), 0)
+
+
+class NewsPageViewTest(LoggedInTestCase):
+    def test_news_page_loads(self):
+        response = self.client.get(reverse('news_feed'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'News Feed')
+
+    def test_news_page_shows_articles(self):
+        ticker = Ticker.objects.create(symbol='AAPL')
+        portfolio = Portfolio.objects.create(name='Test')
+        Lot.objects.create(
+            portfolio=portfolio, ticker=ticker,
+            shares=Decimal('10'), cost_basis=Decimal('150'),
+            purchase_date=date(2024, 1, 1),
+        )
+        NewsArticle.objects.create(
+            ticker=ticker,
+            title='Apple new product launch',
+            url='https://example.com/launch',
+            published_at=timezone.now(),
+            sentiment_label='positive',
+            sentiment_score=Decimal('0.500'),
+        )
+        response = self.client.get(reverse('news_feed'))
+        self.assertContains(response, 'Apple new product launch')
+        self.assertContains(response, 'AAPL')
+
+
+class SettingsViewTest(LoggedInTestCase):
+    def test_settings_page_loads(self):
+        response = self.client.get(reverse('settings'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Settings')
+        self.assertContains(response, 'VADER')
+
+    def test_settings_shows_feeds(self):
+        feed = RSSFeedSource.objects.create(
+            name='Test Feed', url='https://example.com/rss',
+            category='stock', enabled=True,
+        )
+        response = self.client.get(reverse('settings'))
+        self.assertContains(response, 'Test Feed')
+        self.assertContains(response, 'RSS News Feeds')
+
+
+class RSSFeedSourceModelTest(TestCase):
+    def test_create_feed(self):
+        feed = RSSFeedSource.objects.create(
+            name='CNBC Markets',
+            url='https://example.com/cnbc-rss',
+            category='stock',
+        )
+        self.assertTrue(feed.enabled)
+        self.assertIsNone(feed.last_fetched)
+        self.assertEqual(str(feed), 'CNBC Markets (stock)')
+
+    def test_unique_url(self):
+        RSSFeedSource.objects.create(
+            name='Feed 1', url='https://example.com/feed',
+        )
+        with self.assertRaises(Exception):
+            RSSFeedSource.objects.create(
+                name='Feed 2', url='https://example.com/feed',
+            )
+
+    def test_category_choices(self):
+        stock = RSSFeedSource.objects.create(
+            name='Stock', url='https://example.com/stock', category='stock',
+        )
+        geo = RSSFeedSource.objects.create(
+            name='Geo', url='https://example.com/geo', category='geopolitical',
+        )
+        self.assertEqual(stock.get_category_display(), 'Stock/Market')
+        self.assertEqual(geo.get_category_display(), 'Geopolitical')
+
+
+class NewsArticleNullableTickerTest(TestCase):
+    def test_article_without_ticker(self):
+        feed = RSSFeedSource.objects.create(
+            name='Test', url='https://example.com/rss',
+        )
+        article = NewsArticle.objects.create(
+            ticker=None,
+            feed_source=feed,
+            title='Market rallies on economic data',
+            url='https://example.com/general-news',
+            published_at=timezone.now(),
+        )
+        self.assertIsNone(article.ticker)
+        self.assertIn('General', str(article))
+
+    def test_unique_url_constraint(self):
+        ticker = Ticker.objects.create(symbol='AAPL')
+        NewsArticle.objects.create(
+            ticker=ticker,
+            title='Article 1',
+            url='https://example.com/unique-test',
+            published_at=timezone.now(),
+        )
+        with self.assertRaises(Exception):
+            NewsArticle.objects.create(
+                ticker=None,
+                title='Article 2',
+                url='https://example.com/unique-test',
+                published_at=timezone.now(),
+            )
+
+
+RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+    <title>Test Feed</title>
+    <item>
+        <title>AAPL hits new high after strong earnings</title>
+        <link>https://example.com/aapl-article</link>
+        <pubDate>Sat, 22 Feb 2026 12:00:00 GMT</pubDate>
+    </item>
+    <item>
+        <title>Global markets rally on trade deal</title>
+        <link>https://example.com/market-article</link>
+        <pubDate>Sat, 22 Feb 2026 11:00:00 GMT</pubDate>
+    </item>
+    <item>
+        <title>Duplicate article</title>
+        <link>https://example.com/existing</link>
+        <pubDate>Sat, 22 Feb 2026 10:00:00 GMT</pubDate>
+    </item>
+</channel>
+</rss>"""
+
+
+class RSSNewsServiceTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL', company_name='Apple Inc.')
+        self.feed = RSSFeedSource.objects.create(
+            name='Test Feed', url='https://example.com/test-rss',
+            category='stock', enabled=True,
+        )
+        # Pre-existing article to test dedup
+        NewsArticle.objects.create(
+            ticker=self.ticker,
+            title='Existing',
+            url='https://example.com/existing',
+            published_at=timezone.now(),
+        )
+
+    @patch('market.services.requests.get')
+    def test_fetch_feed_creates_articles(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.content = RSS_XML
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        articles = RSSNewsService.fetch_feed(self.feed)
+        # 3 items in XML, 1 is a duplicate => 2 new articles
+        self.assertEqual(len(articles), 2)
+
+    @patch('market.services.requests.get')
+    def test_fetch_feed_matches_ticker(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.content = RSS_XML
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        articles = RSSNewsService.fetch_feed(self.feed)
+        # First article mentions AAPL, should be ticker-linked
+        aapl_articles = [a for a in articles if a.ticker and a.ticker.symbol == 'AAPL']
+        general_articles = [a for a in articles if a.ticker is None]
+        self.assertEqual(len(aapl_articles), 1)
+        self.assertEqual(len(general_articles), 1)
+
+    @patch('market.services.requests.get')
+    def test_fetch_feed_skips_duplicates(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.content = RSS_XML
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        RSSNewsService.fetch_feed(self.feed)
+        # Total articles: 1 existing + 2 new = 3
+        self.assertEqual(NewsArticle.objects.count(), 3)
+
+    @patch('market.services.requests.get')
+    def test_fetch_feed_updates_last_fetched(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.content = RSS_XML
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        self.assertIsNone(self.feed.last_fetched)
+        RSSNewsService.fetch_feed(self.feed)
+        self.feed.refresh_from_db()
+        self.assertIsNotNone(self.feed.last_fetched)
+
+    @patch('market.services.requests.get')
+    def test_fetch_feed_handles_http_error(self, mock_get):
+        mock_get.side_effect = Exception('Connection refused')
+        articles = RSSNewsService.fetch_feed(self.feed)
+        self.assertEqual(len(articles), 0)
+
+    def test_match_ticker_finds_symbol(self):
+        matches = RSSNewsService.match_ticker('AAPL hits new high today')
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].symbol, 'AAPL')
+
+    def test_match_ticker_no_match(self):
+        matches = RSSNewsService.match_ticker('Global markets rally on trade deal')
+        self.assertEqual(len(matches), 0)
+
+    def test_match_ticker_ignores_short_symbols(self):
+        Ticker.objects.create(symbol='A')
+        matches = RSSNewsService.match_ticker('A great day for markets')
+        # Should NOT match single-letter symbol 'A'
+        self.assertEqual(len(matches), 0)
+
+    @patch('market.services.requests.get')
+    def test_fetch_all_feeds(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.content = RSS_XML
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        # Disable all feeds except our test feed
+        RSSFeedSource.objects.exclude(pk=self.feed.pk).update(enabled=False)
+        articles = RSSNewsService.fetch_all_feeds()
+        self.assertTrue(len(articles) >= 0)
+        # Only our test feed should be fetched
+        mock_get.assert_called_once_with(
+            self.feed.url, timeout=15, headers={'User-Agent': 'MyStocks/1.0'}
+        )
+
+
+class ToggleFeedViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.feed = RSSFeedSource.objects.create(
+            name='Test Feed', url='https://example.com/toggle-rss',
+            category='stock', enabled=True,
+        )
+
+    def test_toggle_requires_post(self):
+        response = self.client.get(reverse('toggle_feed', args=[self.feed.pk]))
+        self.assertEqual(response.status_code, 405)
+
+    def test_toggle_disables_feed(self):
+        response = self.client.post(reverse('toggle_feed', args=[self.feed.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.feed.refresh_from_db()
+        self.assertFalse(self.feed.enabled)
+
+    def test_toggle_enables_feed(self):
+        self.feed.enabled = False
+        self.feed.save()
+        response = self.client.post(reverse('toggle_feed', args=[self.feed.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.feed.refresh_from_db()
+        self.assertTrue(self.feed.enabled)
+
+
+class NewsFeedCategoryFilterTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+        self.feed_stock = RSSFeedSource.objects.create(
+            name='Stock Feed', url='https://example.com/stock-rss', category='stock',
+        )
+        self.feed_geo = RSSFeedSource.objects.create(
+            name='Geo Feed', url='https://example.com/geo-rss', category='geopolitical',
+        )
+        now = timezone.now()
+        # Ticker-specific article (no feed source)
+        NewsArticle.objects.create(
+            ticker=self.ticker, title='AAPL earnings beat',
+            url='https://example.com/ticker-art', published_at=now,
+        )
+        # Stock RSS article
+        NewsArticle.objects.create(
+            ticker=None, feed_source=self.feed_stock, title='Markets rally today',
+            url='https://example.com/stock-art', published_at=now,
+        )
+        # Geopolitical RSS article
+        NewsArticle.objects.create(
+            ticker=None, feed_source=self.feed_geo, title='Trade deal signed',
+            url='https://example.com/geo-art', published_at=now,
+        )
+
+    def test_all_category(self):
+        response = self.client.get(reverse('news_feed'))
+        self.assertContains(response, 'AAPL earnings beat')
+        self.assertContains(response, 'Markets rally today')
+        self.assertContains(response, 'Trade deal signed')
+
+    def test_stock_category(self):
+        response = self.client.get(reverse('news_feed') + '?category=stock')
+        self.assertContains(response, 'Markets rally today')
+        self.assertContains(response, 'AAPL earnings beat')
+        self.assertNotContains(response, 'Trade deal signed')
+
+    def test_geopolitical_category(self):
+        response = self.client.get(reverse('news_feed') + '?category=geopolitical')
+        self.assertContains(response, 'Trade deal signed')
+        self.assertNotContains(response, 'Markets rally today')
+
+    def test_ticker_category(self):
+        response = self.client.get(reverse('news_feed') + '?category=ticker')
+        self.assertContains(response, 'AAPL earnings beat')
+        self.assertNotContains(response, 'Markets rally today')
+        self.assertNotContains(response, 'Trade deal signed')
+
+
+class BlendedSentimentTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+        self.feed = RSSFeedSource.objects.create(
+            name='Test Feed', url='https://example.com/blend-rss',
+        )
+
+    def test_blended_both_sources(self):
+        now = timezone.now()
+        # Ticker-specific articles: avg 0.5
+        for i in range(3):
+            NewsArticle.objects.create(
+                ticker=self.ticker, title=f'Good news {i}',
+                url=f'https://example.com/ticker-{i}', published_at=now,
+                sentiment_score=Decimal('0.500'), sentiment_label='positive',
+            )
+        # Market-wide RSS articles: avg -0.2
+        for i in range(3):
+            NewsArticle.objects.create(
+                ticker=None, feed_source=self.feed, title=f'Bad market {i}',
+                url=f'https://example.com/market-{i}', published_at=now,
+                sentiment_score=Decimal('-0.200'), sentiment_label='negative',
+            )
+        blended = NewsService.get_aggregate_sentiment(self.ticker, days=7)
+        # Expected: 0.5 * 0.7 + (-0.2) * 0.3 = 0.35 - 0.06 = 0.29
+        self.assertIsNotNone(blended)
+        self.assertAlmostEqual(float(blended), 0.29, places=1)
+
+    def test_ticker_only_sentiment(self):
+        now = timezone.now()
+        NewsArticle.objects.create(
+            ticker=self.ticker, title='Good news',
+            url='https://example.com/t-only', published_at=now,
+            sentiment_score=Decimal('0.500'), sentiment_label='positive',
+        )
+        result = NewsService.get_aggregate_sentiment(self.ticker, days=7)
+        self.assertAlmostEqual(float(result), 0.5, places=1)
+
+    def test_market_only_sentiment(self):
+        now = timezone.now()
+        NewsArticle.objects.create(
+            ticker=None, feed_source=self.feed, title='Market news',
+            url='https://example.com/m-only', published_at=now,
+            sentiment_score=Decimal('0.300'), sentiment_label='positive',
+        )
+        result = NewsService.get_aggregate_sentiment(self.ticker, days=7)
+        self.assertAlmostEqual(float(result), 0.3, places=1)
