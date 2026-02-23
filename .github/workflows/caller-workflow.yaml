@@ -1,0 +1,38 @@
+name: Sequential Workflow Calls
+on:
+  push:
+    branches:
+      - release-dev
+
+    paths-ignore:
+      - 'helm/mystocks/values.yaml'
+      - '**.md'
+
+    
+
+jobs:
+  # 1. First reusable workflow - Build and push Docker image
+  build-code:
+    uses: ./.github/workflows/docker-build-publish.yaml
+    permissions:
+      contents: write
+      packages: write
+    secrets: inherit
+
+  # 2. deploy app to k8s using argocd
+#  deploy-code:
+#    needs: build-code
+#    uses: ./.github/workflows/deploy.yaml
+#    permissions:
+#      contents: write
+#      packages: write
+#    secrets: inherit
+
+
+
+
+  # 3. Third reusable workflow, runs ONLY after 'run-tests' succeeds
+  ##deploy-app:
+  ##  needs: run-tests
+  ##  uses: ./.github/workflows/reusable-deploy.yml
+  ##  secrets: inherit
