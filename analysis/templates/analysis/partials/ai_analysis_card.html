@@ -1,0 +1,37 @@
+<div id="ai-analysis-section">
+{% if ai_analysis %}
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-robot me-2"></i>Kevin's Take</h5>
+        <div class="d-flex align-items-center gap-2">
+            <small class="text-muted">
+                {{ ai_analysis.generated_at|timesince }} ago
+                <span class="ms-1 badge bg-light text-muted">{{ ai_analysis.model_name }}</span>
+            </small>
+            <button class="btn btn-outline-secondary btn-sm"
+                    hx-post="{% url 'generate_ai_analysis' ticker.symbol %}"
+                    hx-target="#ai-analysis-section"
+                    hx-swap="outerHTML"
+                    hx-indicator="#kevin-spinner">
+                <span id="kevin-spinner" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="mb-0">{{ ai_analysis.analysis_text }}</p>
+    </div>
+</div>
+{% else %}
+<div class="text-center mb-4">
+    <button class="btn btn-outline-primary"
+            hx-post="{% url 'generate_ai_analysis' ticker.symbol %}"
+            hx-target="#ai-analysis-section"
+            hx-swap="outerHTML"
+            hx-indicator="#kevin-spinner">
+        <span id="kevin-spinner" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+        <i class="bi bi-robot me-1"></i>Ask Kevin What He Thinks
+    </button>
+</div>
+{% endif %}
+</div>

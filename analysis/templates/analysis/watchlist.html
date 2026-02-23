@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Watchlist - ApexKube Capital{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><i class="bi bi-eye me-2"></i>Watchlist</h2>
+    <button class="btn btn-outline-primary"
+            hx-post="{% url 'refresh_all' %}"
+            hx-indicator="#refresh-spinner-wl">
+        <span id="refresh-spinner-wl" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+    </button>
+</div>
+
+<!-- Add Ticker Form -->
+<div class="card summary-card mb-4">
+    <div class="card-body">
+        <form hx-post="{% url 'watchlist_add' %}" hx-swap="none" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <div class="col-auto">
+                <label for="watchlist-symbol" class="form-label small text-muted mb-1">Ticker Symbol</label>
+                <input type="text" class="form-control" id="watchlist-symbol" name="symbol"
+                       placeholder="e.g. AAPL" required style="max-width: 150px; text-transform: uppercase;">
+            </div>
+            <div class="col-auto flex-grow-1">
+                <label for="watchlist-notes" class="form-label small text-muted mb-1">Notes (optional)</label>
+                <input type="text" class="form-control" id="watchlist-notes" name="notes"
+                       placeholder="Why are you watching this?">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-plus-circle me-1"></i>Add to Watchlist
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Watchlist Items -->
+{% if items %}
+<div class="card summary-card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Symbol</th>
+                    <th>Company</th>
+                    <th class="text-end">Price</th>
+                    <th class="text-end">Day Change</th>
+                    <th class="text-center">Score</th>
+                    <th>Notes</th>
+                    <th class="text-end">Added</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>
+                        <a href="{% url 'ticker_detail' item.ticker.symbol %}" class="fw-bold text-decoration-none">
+                            {{ item.ticker.symbol }}
+                        </a>
+                    </td>
+                    <td class="text-muted">{{ item.ticker.company_name|default:"--" }}</td>
+                    <td class="text-end fw-semibold">
+                        {% if item.ticker.last_price %}
+                            ${{ item.ticker.last_price|floatformat:2 }}
+                        {% else %}
+                            <span class="text-muted">--</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if item.ticker.day_change_pct is not None %}
+                            <span class="{% if item.ticker.day_change >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                                {% if item.ticker.day_change >= 0 %}+{% endif %}{{ item.ticker.day_change_pct|floatformat:2 }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">--</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {% if item.indicators %}
+                            <span class="badge {% if item.indicators.opportunity_score >= 70 %}bg-success{% elif item.indicators.opportunity_score >= 40 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                {{ item.indicators.opportunity_score }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">--</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted small">{{ item.notes|truncatechars:40|default:"" }}</td>
+                    <td class="text-end text-muted small">{{ item.added_at|timesince }} ago</td>
+                    <td class="text-end">
+                        <button class="btn btn-outline-danger btn-sm"
+                                hx-post="{% url 'watchlist_remove' item.pk %}"
+                                hx-confirm="Remove {{ item.ticker.symbol }} from watchlist?"
+                                hx-swap="none">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card summary-card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-eye fs-1 d-block mb-3"></i>
+        <h5>Your watchlist is empty</h5>
+        <p class="mb-0">Add ticker symbols above to start watching stocks.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

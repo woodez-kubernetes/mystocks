@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Report Audit Log - ApexKube Capital{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Report Audit Log</h2>
+
+<div class="card summary-card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Sent At</th>
+                        <th>Recipient</th>
+                        <th>Status</th>
+                        <th class="text-center">Portfolios</th>
+                        <th class="text-center">Tickers</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.sent_at|date:"M d, Y g:i A" }}</td>
+                        <td>{{ log.recipient }}</td>
+                        <td>
+                            {% if log.status == 'success' %}
+                            <span class="badge bg-success">Success</span>
+                            {% else %}
+                            <span class="badge bg-danger">Error</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">{{ log.portfolio_count }}</td>
+                        <td class="text-center">{{ log.ticker_count }}</td>
+                        <td>
+                            {% if log.error_message %}
+                            <small class="text-danger">{{ log.error_message|truncatewords:20 }}</small>
+                            {% else %}
+                            <span class="text-muted">&mdash;</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+                            No reports sent yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block title %}{{ ticker.symbol }} - {{ ticker.company_name }} - ApexKube Capital{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb mb-3">
+        <li class="breadcrumb-item"><a href="{% url 'dashboard' %}" class="text-decoration-none">Dashboard</a></li>
+        <li class="breadcrumb-item active">{{ ticker.symbol }}</li>
+    </ol>
+</nav>
+
+<!-- Ticker Header -->
+<div id="ticker-header">
+    {% include "market/partials/ticker_header.html" %}
+</div>
+
+<!-- Price Chart -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Price Chart</h5>
+        <div class="btn-group btn-group-sm" role="group" id="period-buttons">
+            <button type="button" class="btn btn-outline-primary" data-period="5d">1W</button>
+            <button type="button" class="btn btn-outline-primary" data-period="1mo">1M</button>
+            <button type="button" class="btn btn-outline-primary active" data-period="3mo">3M</button>
+            <button type="button" class="btn btn-outline-primary" data-period="6mo">6M</button>
+            <button type="button" class="btn btn-outline-primary" data-period="1y">1Y</button>
+            <button type="button" class="btn btn-outline-primary" data-period="5y">5Y</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="mb-2" id="overlay-buttons">
+            <small class="text-muted me-2">Overlays:</small>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-overlay="sma50">SMA 50</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-overlay="sma200">SMA 200</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-overlay="bb">Bollinger</button>
+        </div>
+        <div style="position: relative; height: 350px;">
+            <canvas id="priceChart"></canvas>
+        </div>
+        <div id="chart-loading" class="text-center py-3 d-none">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="text-muted ms-2">Loading chart data...</span>
+        </div>
+    </div>
+</div>
+
+<!-- Technical Indicators -->
+{% include "analysis/partials/indicator_cards.html" %}
+
+{% include "analysis/partials/ai_analysis_card.html" %}
+
+<!-- News Feed -->
+{% include "market/partials/news_feed.html" %}
+
+<div class="row g-4">
+    <!-- Key Stats -->
+    <div class="col-lg-6">
+        <div class="card summary-card h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Key Statistics</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td class="text-muted">Previous Close</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.prev_close %}${{ ticker.prev_close|floatformat:2 }}{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Market Cap</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.market_cap %}
+                                    {% if ticker.market_cap >= 1000000000000 %}
+                                        ${{ ticker.market_cap|divisibleby:1|floatformat:0 }}
+                                    {% elif ticker.market_cap >= 1000000000 %}
+                                        ${{ ticker.market_cap|divisibleby:1|floatformat:0 }}
+                                    {% else %}
+                                        ${{ ticker.market_cap|floatformat:0 }}
+                                    {% endif %}
+                                {% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">P/E Ratio</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.pe_ratio %}{{ ticker.pe_ratio|floatformat:2 }}{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Dividend Yield</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.dividend_yield %}{{ ticker.dividend_yield|floatformat:2 }}%{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">52-Week High</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.week_52_high %}${{ ticker.week_52_high|floatformat:2 }}{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">52-Week Low</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.week_52_low %}${{ ticker.week_52_low|floatformat:2 }}{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Avg Volume</td>
+                            <td class="text-end fw-semibold">
+                                {% if ticker.avg_volume %}{{ ticker.avg_volume|floatformat:0 }}{% else %}--{% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Your Holdings -->
+    <div class="col-lg-6">
+        <div class="card summary-card h-100">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-briefcase me-2"></i>Your Holdings</h5>
+            </div>
+            <div class="card-body">
+                {% if lots %}
+                <div class="mb-3">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <small class="text-muted d-block">Total Shares</small>
+                            <span class="fw-bold fs-5">{{ total_shares|floatformat:"-4" }}</span>
+                        </div>
+                        <div class="col-6">
+                            <small class="text-muted d-block">Market Value</small>
+                            {% if ticker.last_price %}
+                                <span class="fw-bold fs-5">${{ total_shares|floatformat:"-4" }}</span>
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Portfolio</th>
+                            <th class="text-end">Shares</th>
+                            <th class="text-end">Cost Basis</th>
+                            <th class="text-end">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for lot in lots %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'portfolio_detail' lot.portfolio.pk %}" class="text-decoration-none">
+                                    {{ lot.portfolio.name }}
+                                </a>
+                            </td>
+                            <td class="text-end">{{ lot.shares|floatformat:"-4" }}</td>
+                            <td class="text-end">${{ lot.cost_basis|floatformat:2 }}</td>
+                            <td class="text-end text-muted">{{ lot.purchase_date|date:"M d, Y" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-briefcase fs-2 d-block mb-2"></i>
+                    <p class="mb-0">You don't hold {{ ticker.symbol }} in any portfolio.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    const labels = {{ chart_labels|safe }};
+    const prices = {{ chart_prices|safe }};
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    let activeOverlays = new Set();
+
+    const priceDataset = {
+        label: '{{ ticker.symbol }}',
+        data: prices,
+        borderColor: '#0d6efd',
+        backgroundColor: 'rgba(13, 110, 253, 0.05)',
+        borderWidth: 2,
+        fill: true,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.1,
+    };
+
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: [priceDataset] },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { boxWidth: 12, font: { size: 11 } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2);
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { maxTicksLimit: 8, font: { size: 11 } },
+                    grid: { display: false },
+                },
+                y: {
+                    ticks: {
+                        callback: function(value) { return '$' + value.toFixed(0); },
+                        font: { size: 11 },
+                    },
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                }
+            }
+        }
+    });
+
+    function getActivePeriod() {
+        var btn = document.querySelector('#period-buttons .active');
+        return btn ? btn.dataset.period : '3mo';
+    }
+
+    function loadChart() {
+        var period = getActivePeriod();
+        var loading = document.getElementById('chart-loading');
+        loading.classList.remove('d-none');
+
+        var indicatorParam = activeOverlays.size > 0 ? '&indicators=' + Array.from(activeOverlays).join(',') : '';
+
+        fetch('{% url "chart_data" ticker.symbol %}?period=' + period + indicatorParam)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var datasets = [{
+                    label: '{{ ticker.symbol }}',
+                    data: data.prices,
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13, 110, 253, 0.05)',
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.1,
+                }];
+
+                if (data.sma50) {
+                    datasets.push({
+                        label: 'SMA 50',
+                        data: data.sma50,
+                        borderColor: '#fd7e14',
+                        borderWidth: 1.5,
+                        borderDash: [5, 3],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    });
+                }
+                if (data.sma200) {
+                    datasets.push({
+                        label: 'SMA 200',
+                        data: data.sma200,
+                        borderColor: '#6f42c1',
+                        borderWidth: 1.5,
+                        borderDash: [5, 3],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    });
+                }
+                if (data.bb_upper && data.bb_lower) {
+                    datasets.push({
+                        label: 'BB Upper',
+                        data: data.bb_upper,
+                        borderColor: 'rgba(108, 117, 125, 0.5)',
+                        borderWidth: 1,
+                        borderDash: [2, 2],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.1,
+                    });
+                    datasets.push({
+                        label: 'BB Lower',
+                        data: data.bb_lower,
+                        borderColor: 'rgba(108, 117, 125, 0.5)',
+                        backgroundColor: 'rgba(108, 117, 125, 0.05)',
+                        borderWidth: 1,
+                        borderDash: [2, 2],
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.1,
+                    });
+                }
+
+                chart.data.labels = data.labels;
+                chart.data.datasets = datasets;
+                chart.update();
+                loading.classList.add('d-none');
+            })
+            .catch(function() {
+                loading.classList.add('d-none');
+            });
+    }
+
+    // Period buttons
+    document.querySelectorAll('#period-buttons button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelector('#period-buttons .active').classList.remove('active');
+            this.classList.add('active');
+            loadChart();
+        });
+    });
+
+    // Overlay toggle buttons
+    document.querySelectorAll('#overlay-buttons button').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var overlay = this.dataset.overlay;
+            if (activeOverlays.has(overlay)) {
+                activeOverlays.delete(overlay);
+                this.classList.remove('active', 'btn-secondary');
+                this.classList.add('btn-outline-secondary');
+            } else {
+                activeOverlays.add(overlay);
+                this.classList.remove('btn-outline-secondary');
+                this.classList.add('active', 'btn-secondary');
+            }
+            loadChart();
+        });
+    });
+})();
+</script>
+{% endblock %}

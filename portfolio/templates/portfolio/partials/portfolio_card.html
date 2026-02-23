@@ -1,0 +1,70 @@
+<div class="col-md-6 col-lg-4" id="portfolio-card-{{ p.pk }}">
+    <div class="card summary-card h-100">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <h5 class="card-title mb-0">
+                    <a href="{% url 'portfolio_detail' p.pk %}" class="text-decoration-none text-dark">
+                        <i class="bi bi-folder me-1 text-primary"></i>{{ p.name }}
+                    </a>
+                </h5>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-light" data-bs-toggle="dropdown">
+                        <i class="bi bi-three-dots-vertical"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="#"
+                               hx-get="{% url 'portfolio_edit' p.pk %}"
+                               hx-target="#modal-container"
+                               hx-swap="innerHTML"
+                               data-bs-toggle="modal"
+                               data-bs-target="#formModal">
+                                <i class="bi bi-pencil me-2"></i>Edit
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item text-danger" href="#"
+                               hx-get="{% url 'portfolio_delete' p.pk %}"
+                               hx-target="#modal-container"
+                               hx-swap="innerHTML"
+                               data-bs-toggle="modal"
+                               data-bs-target="#formModal">
+                                <i class="bi bi-trash me-2"></i>Delete
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="row g-2 mb-2">
+                <div class="col-6">
+                    <small class="text-muted d-block">Total Cost</small>
+                    <span class="fw-semibold">${{ p.total_cost|floatformat:2 }}</span>
+                </div>
+                <div class="col-6">
+                    <small class="text-muted d-block">Market Value</small>
+                    {% if p.total_value %}
+                        <span class="fw-semibold">${{ p.total_value|floatformat:2 }}</span>
+                    {% else %}
+                        <span class="text-muted">--</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if p.total_gain_loss is not None %}
+            <div class="{% if p.total_gain_loss >= 0 %}text-gain{% else %}text-loss{% endif %} fw-semibold">
+                {% if p.total_gain_loss >= 0 %}+{% endif %}${{ p.total_gain_loss|floatformat:2 }}
+                {% if p.total_gain_loss_pct is not None %}
+                    ({% if p.total_gain_loss_pct >= 0 %}+{% endif %}{{ p.total_gain_loss_pct|floatformat:1 }}%)
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="mt-2 d-flex justify-content-between text-muted small">
+                <span>{{ p.lots.count }} lot{{ p.lots.count|pluralize }}</span>
+                <span>{{ p.created_at|date:"M d, Y" }}</span>
+            </div>
+        </div>
+    </div>
+</div>

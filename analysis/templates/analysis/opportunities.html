@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block title %}Opportunities - ApexKube Capital{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><i class="bi bi-search me-2"></i>Buying Opportunities</h2>
+    <button class="btn btn-outline-primary"
+            hx-post="{% url 'refresh_all' %}"
+            hx-indicator="#refresh-spinner-opp">
+        <span id="refresh-spinner-opp" class="spinner-border spinner-border-sm htmx-indicator me-1"></span>
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+    </button>
+</div>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card summary-card text-center">
+            <div class="card-body py-3">
+                <div class="fs-3 fw-bold">{{ total }}</div>
+                <small class="text-muted">Total Scored</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card summary-card text-center">
+            <div class="card-body py-3">
+                <div class="fs-3 fw-bold text-success">{{ buy_count }}</div>
+                <small class="text-muted">Strong Buy (70+)</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card summary-card text-center">
+            <div class="card-body py-3">
+                <div class="fs-3 fw-bold text-warning">{{ hold_count }}</div>
+                <small class="text-muted">Hold (40-69)</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card summary-card text-center">
+            <div class="card-body py-3">
+                <div class="fs-3 fw-bold">{{ avg_score }}</div>
+                <small class="text-muted">Avg Score</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Bar -->
+<div class="card summary-card mb-4">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <label class="form-label mb-0 text-muted small">Signal:</label>
+            </div>
+            <div class="col-auto">
+                <select name="signal" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">All</option>
+                    <option value="buy" {% if signal_filter == 'buy' %}selected{% endif %}>Buy</option>
+                    <option value="hold" {% if signal_filter == 'hold' %}selected{% endif %}>Hold</option>
+                    <option value="sell" {% if signal_filter == 'sell' %}selected{% endif %}>Sell</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 text-muted small">Sector:</label>
+            </div>
+            <div class="col-auto">
+                <select name="sector" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">All Sectors</option>
+                    {% for s in sectors %}
+                        <option value="{{ s }}" {% if sector_filter == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 text-muted small">Sort:</label>
+            </div>
+            <div class="col-auto">
+                <select name="sort" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="score" {% if sort_by == 'score' %}selected{% endif %}>Score (High → Low)</option>
+                    <option value="change" {% if sort_by == 'change' %}selected{% endif %}>Day Change</option>
+                    <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name (A → Z)</option>
+                </select>
+            </div>
+            {% if signal_filter or sector_filter %}
+            <div class="col-auto">
+                <a href="{% url 'opportunities' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<!-- Opportunities List -->
+{% if snapshots %}
+<div class="accordion" id="opportunitiesAccordion">
+    {% for snap in snapshots %}
+    <div class="card summary-card mb-2">
+        <div class="card-body p-0">
+            <div class="d-flex align-items-center p-3 cursor-pointer"
+                 data-bs-toggle="collapse"
+                 data-bs-target="#detail-{{ snap.ticker.symbol }}"
+                 aria-expanded="false">
+                <!-- Score Badge -->
+                <span class="badge fs-6 me-3 {% if snap.opportunity_score >= 70 %}bg-success{% elif snap.opportunity_score >= 40 %}bg-warning text-dark{% else %}bg-danger{% endif %}"
+                      style="min-width: 48px;">
+                    {{ snap.opportunity_score }}
+                </span>
+
+                <!-- Ticker Info -->
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2">
+                        <a href="{% url 'ticker_detail' snap.ticker.symbol %}" class="fw-bold text-decoration-none fs-5"
+                           onclick="event.stopPropagation();">
+                            {{ snap.ticker.symbol }}
+                        </a>
+                        {% if snap.ticker.company_name %}
+                            <span class="text-muted">{{ snap.ticker.company_name }}</span>
+                        {% endif %}
+                        {% if snap.ticker.sector %}
+                            <span class="badge bg-light text-dark border">{{ snap.ticker.sector }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Price -->
+                <div class="text-end me-3">
+                    {% if snap.ticker.last_price %}
+                        <div class="fw-bold">${{ snap.ticker.last_price|floatformat:2 }}</div>
+                        {% if snap.ticker.day_change is not None %}
+                            <small class="{% if snap.ticker.day_change >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                                {% if snap.ticker.day_change >= 0 %}+{% endif %}{{ snap.ticker.day_change_pct|floatformat:2 }}%
+                            </small>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">--</span>
+                    {% endif %}
+                </div>
+
+                <!-- Signal Badges -->
+                <div class="d-none d-md-flex gap-1">
+                    {% for label, signal in snap.signal_summary %}
+                        <span class="badge {% if signal == 'buy' %}bg-success{% elif signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}"
+                              title="{{ label }}" style="font-size: 0.65rem;">
+                            {{ label|truncatechars:3 }}
+                        </span>
+                    {% endfor %}
+                </div>
+
+                <i class="bi bi-chevron-down ms-3 text-muted"></i>
+            </div>
+
+            <!-- Expandable Detail -->
+            <div class="collapse" id="detail-{{ snap.ticker.symbol }}">
+                <div class="border-top p-3">
+                    <div class="row g-3">
+                        <!-- Radar Chart -->
+                        <div class="col-md-5">
+                            <div style="position: relative; height: 250px;">
+                                <canvas id="radar-{{ snap.ticker.symbol }}"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Indicator Details -->
+                        <div class="col-md-4">
+                            <table class="table table-sm mb-0">
+                                <tbody>
+                                    <tr>
+                                        <td class="text-muted">RSI (14)</td>
+                                        <td class="text-end">{{ snap.rsi|floatformat:1|default:"--" }}</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.rsi_signal == 'buy' %}bg-success{% elif snap.rsi_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.rsi_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">MACD</td>
+                                        <td class="text-end">{{ snap.macd_histogram|floatformat:4|default:"--" }}</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.macd_signal == 'buy' %}bg-success{% elif snap.macd_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.macd_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">Bollinger</td>
+                                        <td class="text-end">{{ snap.bb_middle|floatformat:2|default:"--" }}</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.bb_signal == 'buy' %}bg-success{% elif snap.bb_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.bb_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">SMA</td>
+                                        <td class="text-end">{{ snap.sma_50|floatformat:2|default:"--" }}</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.sma_signal == 'buy' %}bg-success{% elif snap.sma_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.sma_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">Volume</td>
+                                        <td class="text-end">{{ snap.volume_ratio|floatformat:2|default:"--" }}x</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.volume_signal == 'buy' %}bg-success{% elif snap.volume_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.volume_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">Sentiment</td>
+                                        <td class="text-end">{{ snap.sentiment_score|floatformat:3|default:"--" }}</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if snap.sentiment_signal == 'buy' %}bg-success{% elif snap.sentiment_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ snap.sentiment_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="col-md-3">
+                            <div class="d-grid gap-2">
+                                <a href="{% url 'ticker_detail' snap.ticker.symbol %}" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-graph-up me-1"></i>View Details
+                                </a>
+                                <a href="{% url 'compare' %}?symbols={{ snap.ticker.symbol }}" class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-arrows-angle-expand me-1"></i>Compare
+                                </a>
+                                {% if portfolios %}
+                                <div class="dropdown">
+                                    <button class="btn btn-success btn-sm dropdown-toggle w-100" type="button" data-bs-toggle="dropdown">
+                                        <i class="bi bi-plus-circle me-1"></i>Add Lot
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        {% for p in portfolios %}
+                                        <li>
+                                            <a class="dropdown-item"
+                                               href="{% url 'lot_create' p.pk %}?ticker={{ snap.ticker.symbol }}">
+                                                {{ p.name }}
+                                            </a>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card summary-card">
+    <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-search fs-1 d-block mb-3"></i>
+        <h5>No scored tickers yet</h5>
+        <p class="mb-0">Add tickers to your portfolio and refresh prices to see opportunities.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    var radarCharts = {};
+
+    document.querySelectorAll('[id^="detail-"]').forEach(function(el) {
+        el.addEventListener('shown.bs.collapse', function() {
+            var symbol = this.id.replace('detail-', '');
+            if (radarCharts[symbol]) return;
+
+            var canvas = document.getElementById('radar-' + symbol);
+            if (!canvas) return;
+
+            fetch('{% url "radar_data" "PLACEHOLDER" %}'.replace('PLACEHOLDER', symbol))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.labels || !data.labels.length) return;
+                    radarCharts[symbol] = new Chart(canvas.getContext('2d'), {
+                        type: 'radar',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                label: symbol,
+                                data: data.scores,
+                                borderColor: '#0d6efd',
+                                backgroundColor: 'rgba(13, 110, 253, 0.15)',
+                                borderWidth: 2,
+                                pointRadius: 4,
+                                pointBackgroundColor: '#0d6efd',
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                r: {
+                                    beginAtZero: true,
+                                    max: 100,
+                                    ticks: { stepSize: 25, font: { size: 10 } },
+                                    pointLabels: { font: { size: 11 } },
+                                }
+                            },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(ctx) {
+                                            return ctx.label + ': ' + ctx.parsed.r.toFixed(1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+        });
+    });
+})();
+</script>
+{% endblock %}

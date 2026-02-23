@@ -1,0 +1,47 @@
+<div class="table-responsive">
+    <table class="table table-sm mb-0">
+        <thead>
+            <tr>
+                <th>Feed</th>
+                <th>Category</th>
+                <th>Last Fetched</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for feed in feeds %}
+            <tr>
+                <td>{{ feed.name }}</td>
+                <td>
+                    <span class="badge {% if feed.category == 'stock' %}bg-primary{% else %}bg-warning text-dark{% endif %}">
+                        {{ feed.get_category_display }}
+                    </span>
+                </td>
+                <td>
+                    {% if feed.last_fetched %}
+                        {{ feed.last_fetched|timesince }} ago
+                    {% else %}
+                        <span class="text-muted">Never</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if feed.enabled %}
+                        <span class="badge bg-success">Enabled</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Disabled</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <button class="btn btn-sm {% if feed.enabled %}btn-outline-danger{% else %}btn-outline-success{% endif %}"
+                            hx-post="{% url 'toggle_feed' feed.pk %}"
+                            hx-target="#feed-list"
+                            hx-swap="innerHTML">
+                        {% if feed.enabled %}Disable{% else %}Enable{% endif %}
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

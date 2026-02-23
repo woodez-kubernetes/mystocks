@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Portfolios - ApexKube Capital{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">Portfolios</h2>
+    <button class="btn btn-primary"
+            hx-get="{% url 'portfolio_create' %}"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            data-bs-toggle="modal"
+            data-bs-target="#formModal">
+        <i class="bi bi-plus-lg me-1"></i>New Portfolio
+    </button>
+</div>
+
+<div class="row g-3" id="portfolio-grid">
+    {% for p in portfolios %}
+        {% include "portfolio/partials/portfolio_card.html" %}
+    {% empty %}
+    <div class="col-12">
+        <div class="card summary-card">
+            <div class="card-body text-center py-5 text-muted">
+                <i class="bi bi-folder-plus fs-1 d-block mb-3"></i>
+                <p class="mb-2">No portfolios yet.</p>
+                <button class="btn btn-primary"
+                        hx-get="{% url 'portfolio_create' %}"
+                        hx-target="#modal-container"
+                        hx-swap="innerHTML"
+                        data-bs-toggle="modal"
+                        data-bs-target="#formModal">
+                    <i class="bi bi-plus-lg me-1"></i>Create your first portfolio
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Modal shell -->
+<div class="modal fade" id="formModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div id="modal-container" class="modal-content">
+            <!-- HTMX loads form here -->
+        </div>
+    </div>
+</div>
+{% endblock %}

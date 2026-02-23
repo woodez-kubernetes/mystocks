@@ -1,0 +1,163 @@
+<div class="card summary-card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-table me-2"></i>Holdings</h5>
+        <span class="badge bg-primary">{{ holdings|length }} ticker{{ holdings|length|pluralize }}</span>
+    </div>
+    <div class="card-body p-0">
+        {% if holdings %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 30px;"></th>
+                        <th>Ticker</th>
+                        <th class="text-end">Shares</th>
+                        <th class="text-end">Avg Cost</th>
+                        <th class="text-end">Current</th>
+                        <th class="text-end">Total Cost</th>
+                        <th class="text-end">Market Value</th>
+                        <th class="text-end">Gain/Loss</th>
+                        <th class="text-center">Score</th>
+                        <th style="width: 50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for h in holdings %}
+                    <!-- Ticker summary row -->
+                    <tr class="holding-row" data-bs-toggle="collapse" data-bs-target="#lots-{{ h.ticker.symbol }}" role="button">
+                        <td>
+                            <i class="bi bi-chevron-right expand-icon" id="icon-{{ h.ticker.symbol }}"></i>
+                        </td>
+                        <td>
+                            <a href="{% url 'ticker_detail' h.ticker.symbol %}" class="text-decoration-none fw-bold" onclick="event.stopPropagation();">{{ h.ticker.symbol }}</a>
+                            {% if h.ticker.company_name %}
+                                <br><small class="text-muted">{{ h.ticker.company_name }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">{{ h.total_shares|floatformat:"-4" }}</td>
+                        <td class="text-end">${{ h.avg_cost|floatformat:2 }}</td>
+                        <td class="text-end">
+                            {% if h.ticker.last_price %}
+                                ${{ h.ticker.last_price|floatformat:2 }}
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">${{ h.total_cost|floatformat:2 }}</td>
+                        <td class="text-end">
+                            {% if h.current_value is not None %}
+                                ${{ h.current_value|floatformat:2 }}
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if h.gain_loss is not None %}
+                                <span class="{% if h.gain_loss >= 0 %}text-gain{% else %}text-loss{% endif %} fw-semibold">
+                                    {% if h.gain_loss >= 0 %}+{% endif %}${{ h.gain_loss|floatformat:2 }}
+                                    {% if h.gain_loss_pct is not None %}
+                                        <br><small>{% if h.gain_loss_pct >= 0 %}+{% endif %}{{ h.gain_loss_pct|floatformat:1 }}%</small>
+                                    {% endif %}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if h.ticker.indicators %}
+                                <span class="badge {% if h.ticker.indicators.opportunity_score >= 70 %}bg-success{% elif h.ticker.indicators.opportunity_score >= 40 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                    {{ h.ticker.indicators.opportunity_score }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
+                        <td></td>
+                    </tr>
+                    <!-- Expandable lot rows -->
+                    <tr class="collapse lot-collapse" id="lots-{{ h.ticker.symbol }}">
+                        <td colspan="10" class="p-0 border-0">
+                            <table class="table table-sm mb-0 lot-table">
+                                <tbody>
+                                    {% for lot in h.lots %}
+                                    <tr class="lot-row">
+                                        <td style="width: 30px;"></td>
+                                        <td>
+                                            <small class="text-muted">
+                                                <i class="bi bi-dash me-1"></i>{{ lot.purchase_date|date:"M d, Y" }}
+                                            </small>
+                                        </td>
+                                        <td class="text-end">{{ lot.shares|floatformat:"-4" }}</td>
+                                        <td class="text-end">${{ lot.cost_basis|floatformat:2 }}</td>
+                                        <td class="text-end">
+                                            {% if lot.ticker.last_price %}
+                                                ${{ lot.ticker.last_price|floatformat:2 }}
+                                            {% else %}
+                                                --
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">${{ lot.total_cost|floatformat:2 }}</td>
+                                        <td class="text-end">
+                                            {% if lot.current_value is not None %}
+                                                ${{ lot.current_value|floatformat:2 }}
+                                            {% else %}
+                                                --
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            {% if lot.gain_loss is not None %}
+                                                <span class="{% if lot.gain_loss >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                                                    {% if lot.gain_loss >= 0 %}+{% endif %}${{ lot.gain_loss|floatformat:2 }}
+                                                </span>
+                                            {% else %}
+                                                --
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-secondary btn-sm"
+                                                        hx-get="{% url 'lot_edit' lot.pk %}"
+                                                        hx-target="#modal-container"
+                                                        hx-swap="innerHTML"
+                                                        data-bs-toggle="modal"
+                                                        data-bs-target="#formModal"
+                                                        title="Edit lot">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <button class="btn btn-outline-danger btn-sm"
+                                                        hx-get="{% url 'lot_delete' lot.pk %}"
+                                                        hx-target="#modal-container"
+                                                        hx-swap="innerHTML"
+                                                        data-bs-toggle="modal"
+                                                        data-bs-target="#formModal"
+                                                        title="Delete lot">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+            <p class="mb-2">No holdings yet.</p>
+            <button class="btn btn-primary"
+                    hx-get="{% url 'lot_create' portfolio.pk %}"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML"
+                    data-bs-toggle="modal"
+                    data-bs-target="#formModal">
+                <i class="bi bi-plus-lg me-1"></i>Add your first lot
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
