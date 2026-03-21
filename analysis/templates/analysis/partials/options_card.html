@@ -1,0 +1,128 @@
+{% if options_snapshot %}
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Options Sentiment</h5>
+        <div>
+            <span class="badge fs-6 {% if options_snapshot.options_score >= 65 %}bg-success{% elif options_snapshot.options_score >= 35 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                Score: {{ options_snapshot.options_score }}/100
+            </span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <!-- Put/Call Volume Ratio -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">P/C Volume</small>
+                        <h5 class="mb-1">{% if options_snapshot.put_call_volume_ratio is not None %}{{ options_snapshot.put_call_volume_ratio|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        {% if options_snapshot.put_call_volume_ratio is not None %}
+                            {% if options_snapshot.put_call_volume_ratio > 1.0 %}
+                                <span class="badge bg-success">Fear (Buy)</span>
+                            {% elif options_snapshot.put_call_volume_ratio < 0.7 %}
+                                <span class="badge bg-danger">Complacent</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Neutral</span>
+                            {% endif %}
+                        {% endif %}
+                        <small class="text-muted d-block mt-1">Put/Call ratio</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Put/Call OI Ratio -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">P/C Open Int</small>
+                        <h5 class="mb-1">{% if options_snapshot.put_call_oi_ratio is not None %}{{ options_snapshot.put_call_oi_ratio|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        {% if options_snapshot.put_call_oi_ratio is not None %}
+                            {% if options_snapshot.put_call_oi_ratio > 1.0 %}
+                                <span class="badge bg-success">Heavy Puts</span>
+                            {% elif options_snapshot.put_call_oi_ratio < 0.7 %}
+                                <span class="badge bg-danger">Heavy Calls</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Balanced</span>
+                            {% endif %}
+                        {% endif %}
+                        <small class="text-muted d-block mt-1">Positioning</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IV Skew -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">IV Skew</small>
+                        <h5 class="mb-1">{% if options_snapshot.iv_skew is not None %}{% if options_snapshot.iv_skew >= 0 %}+{% endif %}{{ options_snapshot.iv_skew|floatformat:3 }}{% else %}--{% endif %}</h5>
+                        {% if options_snapshot.iv_skew is not None %}
+                            {% if options_snapshot.iv_skew > 0.05 %}
+                                <span class="badge bg-success">Put Premium</span>
+                            {% elif options_snapshot.iv_skew < -0.05 %}
+                                <span class="badge bg-danger">Call Premium</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Flat</span>
+                            {% endif %}
+                        {% endif %}
+                        <small class="text-muted d-block mt-1">OTM Put - Call IV</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Max Pain -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Max Pain</small>
+                        <h5 class="mb-1">{% if options_snapshot.max_pain is not None %}${{ options_snapshot.max_pain|floatformat:2 }}{% else %}--{% endif %}</h5>
+                        {% if options_snapshot.max_pain is not None and ticker.last_price %}
+                            {% widthratio ticker.last_price options_snapshot.max_pain 100 as pct %}
+                            <span class="badge bg-info text-dark">
+                                {% if ticker.last_price > options_snapshot.max_pain %}Above{% elif ticker.last_price < options_snapshot.max_pain %}Below{% else %}At{% endif %} Pain
+                            </span>
+                        {% endif %}
+                        <small class="text-muted d-block mt-1">Price gravity</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Options Signal -->
+            <div class="col-md col-sm-6">
+                <div class="card h-100 border-0 bg-light">
+                    <div class="card-body text-center py-3">
+                        <small class="text-muted d-block mb-1">Signal</small>
+                        <h5 class="mb-1">
+                            <span class="badge fs-6 {% if options_snapshot.options_signal == 'buy' %}bg-success{% elif options_snapshot.options_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {% if options_snapshot.options_signal == 'buy' %}Bullish{% elif options_snapshot.options_signal == 'sell' %}Bearish{% else %}Neutral{% endif %}
+                            </span>
+                        </h5>
+                        <small class="text-muted d-block mt-1">Contrarian</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if options_snapshot.has_unusual_activity %}
+        <div class="mt-3">
+            <div class="alert alert-warning mb-0 py-2">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                <strong>Unusual Activity Detected</strong>
+                <small class="d-block mt-1">
+                    {% for item in options_snapshot.unusual_activity_details %}
+                        {{ item.type|upper }} ${{ item.strike }} — Vol: {{ item.volume }}, OI: {{ item.open_interest }} ({{ item.ratio }}x){% if not forloop.last %}<br>{% endif %}
+                    {% endfor %}
+                </small>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if options_snapshot.expirations_analyzed %}
+        <small class="text-muted d-block mt-2">
+            Expirations analyzed: {{ options_snapshot.expirations_analyzed|join:", " }}
+            | Updated: {{ options_snapshot.updated_at|timesince }} ago
+        </small>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

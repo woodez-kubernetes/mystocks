@@ -34,6 +34,12 @@ def ticker_detail(request, symbol):
     except Exception:
         ai_analysis = None
 
+    # Options data
+    try:
+        options_snapshot = ticker.options_snapshot
+    except Exception:
+        options_snapshot = None
+
     # News articles
     news_articles = NewsArticle.objects.filter(ticker=ticker)[:10]
     aggregate_sentiment = NewsService.get_aggregate_sentiment(ticker)
@@ -46,6 +52,7 @@ def ticker_detail(request, symbol):
         'chart_prices': json.dumps(chart_prices),
         'indicators': indicators,
         'ai_analysis': ai_analysis,
+        'options_snapshot': options_snapshot,
         'news_articles': news_articles,
         'aggregate_sentiment': aggregate_sentiment,
     }

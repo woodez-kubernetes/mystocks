@@ -190,7 +190,29 @@ class StockDataService:
         except Exception:
             logger.exception(f"Failed to fetch news for {symbol}")
 
-        # 5. Compute technical indicators (includes sentiment in score)
+        # 5. Fetch options data
+        try:
+            options_data = OptionsDataService.fetch_options_data(symbol)
+            if options_data:
+                from analysis.models import OptionsSnapshot
+                OptionsSnapshot.objects.update_or_create(
+                    ticker=ticker_obj,
+                    defaults={
+                        'put_call_volume_ratio': _to_decimal(options_data['put_call_volume_ratio'], 3),
+                        'put_call_oi_ratio': _to_decimal(options_data['put_call_oi_ratio'], 3),
+                        'iv_skew': _to_decimal(options_data['iv_skew'], 4),
+                        'max_pain': _to_decimal(options_data['max_pain']),
+                        'has_unusual_activity': options_data['has_unusual_activity'],
+                        'unusual_activity_details': options_data['unusual_activity_details'],
+                        'expirations_analyzed': options_data['expirations_analyzed'],
+                        'options_score': options_data['options_score'],
+                        'options_signal': options_data['options_signal'],
+                    }
+                )
+        except Exception:
+            logger.exception(f"Failed to fetch options data for {symbol}")
+
+        # 6. Compute technical indicators (includes sentiment + options in score)
         try:
             from analysis.services import TechnicalIndicatorService
             TechnicalIndicatorService.compute_indicators(ticker_obj)
@@ -376,6 +398,241 @@ class NewsService:
 
 # Minimum symbol length to avoid false positives (e.g. "A", "I", "AT")
 MIN_SYMBOL_LENGTH = 2
+
+
+class OptionsDataService:
+    """Fetch options chain data from Yahoo Finance and compute directional metrics.
+
+    Uses contrarian interpretation: high put/call ratio (excessive fear) = buying opportunity.
+    """
+
+    # Minimum thresholds to avoid noise from illiquid options
+    MIN_TOTAL_VOLUME = 100
+    MIN_TOTAL_OI = 500
+
+    @staticmethod
+    def fetch_options_data(symbol):
+        """Fetch options chain and compute all metrics for a ticker.
+
+        Returns a dict of computed metrics, or None if no options available.
+        """
+        try:
+            stock = yf.Ticker(symbol)
+            expiry_dates = stock.options
+            if not expiry_dates:
+                logger.info(f"{symbol}: no options available")
+                return None
+
+            # Select expirations within ~30 days
+            today = date.today()
+            max_date = today + timedelta(days=30)
+            near_expirations = [
+                exp for exp in expiry_dates
+                if date.fromisoformat(exp) <= max_date
+            ]
+
+            # Need at least 1 expiration; if none within 30 days, take the nearest
+            if not near_expirations:
+                near_expirations = [expiry_dates[0]]
+
+            # Aggregate calls and puts across selected expirations
+            all_calls = []
+            all_puts = []
+            for exp_date in near_expirations:
+                try:
+                    chain = stock.option_chain(exp_date)
+                    all_calls.append(chain.calls)
+                    all_puts.append(chain.puts)
+                except Exception:
+                    logger.warning(f"{symbol}: failed to fetch chain for {exp_date}")
+                    continue
+
+            if not all_calls or not all_puts:
+                return None
+
+            import pandas as pd
+            calls_df = pd.concat(all_calls, ignore_index=True)
+            puts_df = pd.concat(all_puts, ignore_index=True)
+
+            # Get current price for IV skew calculation
+            info = stock.fast_info
+            current_price = getattr(info, 'last_price', None)
+            if current_price is None:
+                return None
+
+            # Compute metrics
+            pc_volume = OptionsDataService._put_call_volume_ratio(calls_df, puts_df)
+            pc_oi = OptionsDataService._put_call_oi_ratio(calls_df, puts_df)
+            iv_skew = OptionsDataService._compute_iv_skew(calls_df, puts_df, current_price)
+            max_pain = OptionsDataService._compute_max_pain(calls_df, puts_df)
+            unusual = OptionsDataService._detect_unusual_activity(calls_df, puts_df)
+
+            # Compute contrarian sub-score (0-100)
+            options_score = OptionsDataService._compute_options_score(pc_volume, pc_oi, iv_skew)
+            options_signal = OptionsDataService._options_signal(options_score)
+
+            return {
+                'put_call_volume_ratio': pc_volume,
+                'put_call_oi_ratio': pc_oi,
+                'iv_skew': iv_skew,
+                'max_pain': max_pain,
+                'current_price': current_price,
+                'has_unusual_activity': len(unusual) > 0,
+                'unusual_activity_details': unusual,
+                'expirations_analyzed': near_expirations,
+                'options_score': options_score,
+                'options_signal': options_signal,
+            }
+        except Exception:
+            logger.exception(f"Failed to fetch options data for {symbol}")
+            return None
+
+    @staticmethod
+    def _put_call_volume_ratio(calls_df, puts_df):
+        """Compute put/call volume ratio."""
+        call_vol = calls_df['volume'].sum()
+        put_vol = puts_df['volume'].sum()
+        if call_vol < OptionsDataService.MIN_TOTAL_VOLUME:
+            return None
+        return round(put_vol / call_vol, 3) if call_vol > 0 else None
+
+    @staticmethod
+    def _put_call_oi_ratio(calls_df, puts_df):
+        """Compute put/call open interest ratio."""
+        call_oi = calls_df['openInterest'].sum()
+        put_oi = puts_df['openInterest'].sum()
+        if call_oi < OptionsDataService.MIN_TOTAL_OI:
+            return None
+        return round(put_oi / call_oi, 3) if call_oi > 0 else None
+
+    @staticmethod
+    def _compute_iv_skew(calls_df, puts_df, current_price):
+        """Compute IV skew: avg OTM put IV minus avg OTM call IV.
+
+        Positive skew = puts more expensive (hedging/fear).
+        """
+        import pandas as pd
+
+        # OTM puts: strike < current price
+        otm_puts = puts_df[puts_df['strike'] < current_price].copy()
+        otm_puts = otm_puts.dropna(subset=['impliedVolatility'])
+        otm_puts = otm_puts[otm_puts['impliedVolatility'] > 0]
+
+        # OTM calls: strike > current price
+        otm_calls = calls_df[calls_df['strike'] > current_price].copy()
+        otm_calls = otm_calls.dropna(subset=['impliedVolatility'])
+        otm_calls = otm_calls[otm_calls['impliedVolatility'] > 0]
+
+        if otm_puts.empty or otm_calls.empty:
+            return None
+
+        avg_put_iv = otm_puts['impliedVolatility'].mean()
+        avg_call_iv = otm_calls['impliedVolatility'].mean()
+
+        return round(avg_put_iv - avg_call_iv, 4)
+
+    @staticmethod
+    def _compute_max_pain(calls_df, puts_df):
+        """Calculate max pain: the strike price where total option losses are maximized.
+
+        At max pain, the total intrinsic value of all options is minimized (most expire worthless).
+        """
+        import pandas as pd
+
+        all_strikes = sorted(set(calls_df['strike'].tolist() + puts_df['strike'].tolist()))
+        if not all_strikes:
+            return None
+
+        # Build OI lookup
+        call_oi = calls_df.groupby('strike')['openInterest'].sum()
+        put_oi = puts_df.groupby('strike')['openInterest'].sum()
+
+        min_pain = float('inf')
+        max_pain_strike = None
+
+        for strike in all_strikes:
+            total_pain = 0.0
+
+            # Pain for call holders at this settlement price
+            for s, oi in call_oi.items():
+                if strike > s:
+                    total_pain += (strike - s) * oi
+
+            # Pain for put holders at this settlement price
+            for s, oi in put_oi.items():
+                if strike < s:
+                    total_pain += (s - strike) * oi
+
+            if total_pain < min_pain:
+                min_pain = total_pain
+                max_pain_strike = strike
+
+        return round(max_pain_strike, 2) if max_pain_strike is not None else None
+
+    @staticmethod
+    def _detect_unusual_activity(calls_df, puts_df):
+        """Flag contracts where volume > 5x open interest."""
+        unusual = []
+
+        for label, df in [('call', calls_df), ('put', puts_df)]:
+            for _, row in df.iterrows():
+                oi = row.get('openInterest', 0)
+                vol = row.get('volume', 0)
+                if oi and oi > 0 and vol > 5 * oi and vol >= 100:
+                    unusual.append({
+                        'type': label,
+                        'strike': float(row['strike']),
+                        'volume': int(vol),
+                        'open_interest': int(oi),
+                        'ratio': round(vol / oi, 1),
+                    })
+
+        # Sort by ratio descending, limit to top 10
+        unusual.sort(key=lambda x: x['ratio'], reverse=True)
+        return unusual[:10]
+
+    @staticmethod
+    def _compute_options_score(pc_volume, pc_oi, iv_skew):
+        """Compute contrarian options score (0-100).
+
+        High P/C ratio = fear = buying opportunity = high score.
+        """
+        sub_scores = []
+        weights = []
+
+        if pc_volume is not None:
+            # Contrarian: P/C ratio of 2.0 → score 90, 1.0 → 50, 0.3 → 10
+            score = max(0, min(100, 50 + (pc_volume - 1.0) * 40))
+            sub_scores.append(score)
+            weights.append(0.40)
+
+        if pc_oi is not None:
+            score = max(0, min(100, 50 + (pc_oi - 1.0) * 40))
+            sub_scores.append(score)
+            weights.append(0.35)
+
+        if iv_skew is not None:
+            # Positive skew (puts more expensive) = fear = contrarian bullish
+            # Skew of +0.10 → ~70, 0 → 50, -0.10 → ~30
+            score = max(0, min(100, 50 + iv_skew * 200))
+            sub_scores.append(score)
+            weights.append(0.25)
+
+        if not sub_scores:
+            return 50  # neutral default
+
+        # Normalize weights
+        total_weight = sum(weights)
+        weighted = sum(s * w for s, w in zip(sub_scores, weights)) / total_weight
+        return int(round(max(0, min(100, weighted))))
+
+    @staticmethod
+    def _options_signal(score):
+        if score >= 65:
+            return 'buy'
+        if score <= 35:
+            return 'sell'
+        return 'hold'
 
 
 class RSSNewsService:

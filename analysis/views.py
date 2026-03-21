@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from analysis.models import IndicatorSnapshot
+from analysis.models import IndicatorSnapshot, OptionsSnapshot
 from portfolio.models import Ticker, WatchlistItem
 
 
@@ -141,6 +141,15 @@ def ticker_radar_data(request, symbol):
         scores['Sentiment'] = max(0, min(100, (float(snap.sentiment_score) + 1) * 50))
     else:
         scores['Sentiment'] = 50
+
+    # Options sub-score
+    try:
+        from analysis.models import OptionsSnapshot
+        opts = ticker.options_snapshot
+        if opts and opts.options_score is not None:
+            scores['Options'] = float(opts.options_score)
+    except OptionsSnapshot.DoesNotExist:
+        pass
 
     labels = list(scores.keys())
     values = [round(v, 1) for v in scores.values()]
