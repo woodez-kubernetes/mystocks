@@ -52,7 +52,7 @@ class IndicatorSnapshot(models.Model):
     @property
     def signal_summary(self):
         """Return list of (label, signal) tuples for all indicators."""
-        return [
+        signals = [
             ('RSI', self.rsi_signal),
             ('MACD', self.macd_signal),
             ('BB', self.bb_signal),
@@ -60,9 +60,49 @@ class IndicatorSnapshot(models.Model):
             ('Vol', self.volume_signal),
             ('Sent', self.sentiment_signal),
         ]
+        # Include options signal if available
+        try:
+            opts = self.ticker.options_snapshot
+            if opts:
+                signals.append(('Opt', opts.options_signal))
+        except Exception:
+            pass
+        return signals
 
     class Meta:
         ordering = ['-opportunity_score']
+
+
+class OptionsSnapshot(models.Model):
+    ticker = models.OneToOneField(
+        'portfolio.Ticker', on_delete=models.CASCADE, related_name='options_snapshot'
+    )
+    put_call_volume_ratio = models.DecimalField(
+        max_digits=6, decimal_places=3, null=True, blank=True
+    )
+    put_call_oi_ratio = models.DecimalField(
+        max_digits=6, decimal_places=3, null=True, blank=True
+    )
+    iv_skew = models.DecimalField(
+        max_digits=6, decimal_places=4, null=True, blank=True
+    )
+    max_pain = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    has_unusual_activity = models.BooleanField(default=False)
+    unusual_activity_details = models.JSONField(default=list, blank=True)
+    expirations_analyzed = models.JSONField(default=list, blank=True)
+    options_signal = models.CharField(
+        max_length=4, choices=SIGNAL_CHOICES, default='hold'
+    )
+    options_score = models.IntegerField(default=50)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.ticker.symbol} options score={self.options_score}'
+
+    class Meta:
+        ordering = ['-options_score']
 
 
 class AIAnalysis(models.Model):

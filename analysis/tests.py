@@ -7,7 +7,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from analysis.models import AIAnalysis, IndicatorSnapshot
+from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot
 from analysis.services import AIAnalysisService, TechnicalIndicatorService
 from market.models import NewsArticle, PriceHistory
 from portfolio.models import Ticker
@@ -619,3 +619,104 @@ class TickerDetailAIAnalysisTest(LoggedInTestCase):
         Ticker.objects.create(symbol='TEST', last_price=Decimal('100.00'))
         response = self.client.get(reverse('generate_ai_analysis', args=['TEST']))
         self.assertEqual(response.status_code, 405)
+
+
+class OptionsSnapshotModelTest(TestCase):
+    def test_str(self):
+        ticker = Ticker.objects.create(symbol='TEST')
+        snap = OptionsSnapshot.objects.create(ticker=ticker, options_score=72)
+        self.assertEqual(str(snap), 'TEST options score=72')
+
+    def test_one_to_one(self):
+        ticker = Ticker.objects.create(symbol='TEST')
+        OptionsSnapshot.objects.create(ticker=ticker, options_score=50)
+        with self.assertRaises(Exception):
+            OptionsSnapshot.objects.create(ticker=ticker, options_score=60)
+
+    def test_defaults(self):
+        ticker = Ticker.objects.create(symbol='TEST')
+        snap = OptionsSnapshot.objects.create(ticker=ticker)
+        self.assertEqual(snap.options_score, 50)
+        self.assertEqual(snap.options_signal, 'hold')
+        self.assertFalse(snap.has_unusual_activity)
+
+
+class OptionsInCompositeScoreTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='TEST', last_price=Decimal('110.00'))
+        _create_price_history(self.ticker, num_days=250)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=Decimal('0.1'))
+    def test_score_with_options(self, mock_sentiment):
+        # Create an options snapshot with a high score
+        OptionsSnapshot.objects.create(
+            ticker=self.ticker, options_score=90, options_signal='buy'
+        )
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        self.assertIsNotNone(snapshot)
+        score_with_options = snapshot.opportunity_score
+
+        # Remove options and recompute
+        OptionsSnapshot.objects.filter(ticker=self.ticker).delete()
+        snapshot2 = TechnicalIndicatorService.compute_indicators(self.ticker)
+        score_without_options = snapshot2.opportunity_score
+
+        # With a high options score (90), composite should be higher
+        self.assertGreaterEqual(score_with_options, score_without_options)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=None)
+    def test_score_without_sentiment_with_options(self, mock_sentiment):
+        OptionsSnapshot.objects.create(
+            ticker=self.ticker, options_score=80, options_signal='buy'
+        )
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        self.assertIsNotNone(snapshot)
+        self.assertGreaterEqual(snapshot.opportunity_score, 0)
+        self.assertLessEqual(snapshot.opportunity_score, 100)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=Decimal('0.1'))
+    def test_signal_summary_includes_options(self, mock_sentiment):
+        OptionsSnapshot.objects.create(
+            ticker=self.ticker, options_score=80, options_signal='buy'
+        )
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        signals = snapshot.signal_summary
+        signal_labels = [label for label, _ in signals]
+        self.assertIn('Opt', signal_labels)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=Decimal('0.1'))
+    def test_signal_summary_without_options(self, mock_sentiment):
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        signals = snapshot.signal_summary
+        signal_labels = [label for label, _ in signals]
+        self.assertNotIn('Opt', signal_labels)
+
+
+class OptionsRadarChartTest(LoggedInTestCase):
+    def test_radar_includes_options(self):
+        ticker = Ticker.objects.create(
+            symbol='TEST', last_price=Decimal('100.00'), last_updated=timezone.now()
+        )
+        IndicatorSnapshot.objects.create(
+            ticker=ticker, rsi=Decimal('45'), opportunity_score=55
+        )
+        OptionsSnapshot.objects.create(
+            ticker=ticker, options_score=75, options_signal='buy'
+        )
+        response = self.client.get(reverse('radar_data', args=['TEST']))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('Options', data['labels'])
+        idx = data['labels'].index('Options')
+        self.assertEqual(data['scores'][idx], 75.0)
+
+    def test_radar_without_options(self):
+        ticker = Ticker.objects.create(
+            symbol='TEST', last_price=Decimal('100.00'), last_updated=timezone.now()
+        )
+        IndicatorSnapshot.objects.create(
+            ticker=ticker, rsi=Decimal('45'), opportunity_score=55
+        )
+        response = self.client.get(reverse('radar_data', args=['TEST']))
+        data = response.json()
+        self.assertNotIn('Options', data['labels'])

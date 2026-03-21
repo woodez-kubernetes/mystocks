@@ -9,7 +9,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator
 from ta.volatility import BollingerBands
 
-from analysis.models import AIAnalysis, IndicatorSnapshot
+from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot
 from market.models import PriceHistory
 
 logger = logging.getLogger(__name__)
@@ -84,10 +84,20 @@ class TechnicalIndicatorService:
         sentiment_val = float(avg_sentiment) if avg_sentiment is not None else None
         sentiment_signal = TechnicalIndicatorService._sentiment_signal(sentiment_val)
 
+        # --- Options Score (from OptionsSnapshot if available) ---
+        options_score_val = None
+        try:
+            opts = ticker.options_snapshot
+            if opts and opts.options_score is not None:
+                options_score_val = opts.options_score
+        except OptionsSnapshot.DoesNotExist:
+            pass
+
         # --- Opportunity Score ---
         score = TechnicalIndicatorService._compute_score(
             rsi_val, macd_hist, last_close, bb_lower, bb_upper, bb_middle,
-            sma_50_val, sma_200_val, volume_ratio, sentiment_val
+            sma_50_val, sma_200_val, volume_ratio, sentiment_val,
+            options_score_val
         )
 
         snapshot, _ = IndicatorSnapshot.objects.update_or_create(
@@ -195,10 +205,12 @@ class TechnicalIndicatorService:
 
     @staticmethod
     def _compute_score(rsi, macd_hist, price, bb_lower, bb_upper, bb_middle,
-                       sma_50, sma_200, volume_ratio, sentiment=None):
+                       sma_50, sma_200, volume_ratio, sentiment=None,
+                       options_score=None):
         """Weighted average of sub-scores.
 
-        With sentiment: RSI(15%), MACD(15%), BB(15%), SMA(25%), Vol(10%), Sentiment(20%)
+        With all data:    RSI(12%), MACD(12%), BB(12%), SMA(22%), Vol(10%), Sentiment(17%), Options(15%)
+        Without options:  RSI(15%), MACD(15%), BB(15%), SMA(25%), Vol(10%), Sentiment(20%)
         Without sentiment: RSI(20%), MACD(20%), BB(20%), SMA(25%), Vol(15%)
         """
         scores = {}
@@ -257,8 +269,21 @@ class TechnicalIndicatorService:
         if has_sentiment:
             scores['sentiment'] = max(0, min(100, (sentiment + 1) * 50))
 
-        # Weighted average — adjust weights based on sentiment availability
-        if has_sentiment:
+        # Options sub-score (already 0-100 from OptionsDataService)
+        has_options = options_score is not None
+
+        # Weighted average — adjust weights based on data availability
+        if has_sentiment and has_options:
+            weighted = (
+                scores['rsi'] * 0.12
+                + scores['macd'] * 0.12
+                + scores['bb'] * 0.12
+                + scores['sma'] * 0.22
+                + scores['volume'] * 0.10
+                + scores['sentiment'] * 0.17
+                + options_score * 0.15
+            )
+        elif has_sentiment:
             weighted = (
                 scores['rsi'] * 0.15
                 + scores['macd'] * 0.15
@@ -266,6 +291,15 @@ class TechnicalIndicatorService:
                 + scores['sma'] * 0.25
                 + scores['volume'] * 0.10
                 + scores['sentiment'] * 0.20
+            )
+        elif has_options:
+            weighted = (
+                scores['rsi'] * 0.18
+                + scores['macd'] * 0.18
+                + scores['bb'] * 0.18
+                + scores['sma'] * 0.22
+                + scores['volume'] * 0.12
+                + options_score * 0.12
             )
         else:
             weighted = (
@@ -312,6 +346,24 @@ class AIAnalysisService:
             ])
             if indicators.sentiment_score is not None:
                 lines.append(f"- News sentiment: {indicators.sentiment_score} ({indicators.sentiment_signal})")
+
+        # Options data
+        try:
+            opts = ticker.options_snapshot
+            if opts:
+                lines.extend([
+                    "",
+                    "Options sentiment (contrarian):",
+                    f"- Put/Call volume ratio: {opts.put_call_volume_ratio}",
+                    f"- Put/Call OI ratio: {opts.put_call_oi_ratio}",
+                    f"- IV skew: {opts.iv_skew}",
+                    f"- Max pain: ${opts.max_pain}",
+                    f"- Options score: {opts.options_score}/100 ({opts.options_signal})",
+                ])
+                if opts.has_unusual_activity:
+                    lines.append(f"- Unusual options activity detected")
+        except Exception:
+            pass
 
         if news_articles:
             lines.extend(["", "Recent headlines:"])

@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from market.models import NewsArticle, PriceHistory, RSSFeedSource
-from market.services import NewsService, RSSNewsService, StockDataService
+from market.services import NewsService, OptionsDataService, RSSNewsService, StockDataService
 from portfolio.models import Lot, Portfolio, Ticker
 
 
@@ -765,3 +765,179 @@ class BlendedSentimentTest(TestCase):
         )
         result = NewsService.get_aggregate_sentiment(self.ticker, days=7)
         self.assertAlmostEqual(float(result), 0.3, places=1)
+
+
+def _make_options_df(strikes, volumes, ois, ivs):
+    """Helper to create a mock options DataFrame."""
+    import pandas as pd
+    return pd.DataFrame({
+        'strike': strikes,
+        'volume': volumes,
+        'openInterest': ois,
+        'impliedVolatility': ivs,
+    })
+
+
+class OptionsDataServicePutCallRatioTest(TestCase):
+    def test_volume_ratio(self):
+        calls = _make_options_df([100, 105], [500, 300], [1000, 800], [0.3, 0.25])
+        puts = _make_options_df([95, 90], [600, 400], [900, 700], [0.35, 0.4])
+        ratio = OptionsDataService._put_call_volume_ratio(calls, puts)
+        # put_vol=1000, call_vol=800 → 1.25
+        self.assertAlmostEqual(ratio, 1.25, places=2)
+
+    def test_volume_ratio_low_volume_returns_none(self):
+        calls = _make_options_df([100], [10], [1000], [0.3])
+        puts = _make_options_df([95], [20], [900], [0.35])
+        ratio = OptionsDataService._put_call_volume_ratio(calls, puts)
+        self.assertIsNone(ratio)
+
+    def test_oi_ratio(self):
+        calls = _make_options_df([100, 105], [500, 300], [1000, 500], [0.3, 0.25])
+        puts = _make_options_df([95, 90], [600, 400], [800, 400], [0.35, 0.4])
+        ratio = OptionsDataService._put_call_oi_ratio(calls, puts)
+        # put_oi=1200, call_oi=1500 → 0.8
+        self.assertAlmostEqual(ratio, 0.8, places=2)
+
+    def test_oi_ratio_low_oi_returns_none(self):
+        calls = _make_options_df([100], [500], [100], [0.3])
+        puts = _make_options_df([95], [600], [80], [0.35])
+        ratio = OptionsDataService._put_call_oi_ratio(calls, puts)
+        self.assertIsNone(ratio)
+
+
+class OptionsIVSkewTest(TestCase):
+    def test_positive_skew(self):
+        # Current price = 100; OTM puts (strike<100), OTM calls (strike>100)
+        calls = _make_options_df([105, 110], [100, 100], [500, 500], [0.25, 0.20])
+        puts = _make_options_df([95, 90], [100, 100], [500, 500], [0.40, 0.45])
+        skew = OptionsDataService._compute_iv_skew(calls, puts, 100.0)
+        # avg put IV = 0.425, avg call IV = 0.225, skew = 0.20
+        self.assertAlmostEqual(skew, 0.20, places=2)
+        self.assertGreater(skew, 0)  # positive = puts more expensive
+
+    def test_negative_skew(self):
+        calls = _make_options_df([105, 110], [100, 100], [500, 500], [0.45, 0.50])
+        puts = _make_options_df([95, 90], [100, 100], [500, 500], [0.20, 0.25])
+        skew = OptionsDataService._compute_iv_skew(calls, puts, 100.0)
+        self.assertLess(skew, 0)
+
+    def test_no_otm_options_returns_none(self):
+        # All calls ITM (strike < current_price)
+        calls = _make_options_df([90, 95], [100, 100], [500, 500], [0.3, 0.25])
+        puts = _make_options_df([105, 110], [100, 100], [500, 500], [0.35, 0.4])
+        skew = OptionsDataService._compute_iv_skew(calls, puts, 100.0)
+        self.assertIsNone(skew)
+
+
+class OptionsMaxPainTest(TestCase):
+    def test_max_pain_calculation(self):
+        calls = _make_options_df([95, 100, 105], [100, 200, 100], [1000, 2000, 500], [0.3, 0.25, 0.2])
+        puts = _make_options_df([95, 100, 105], [100, 200, 100], [500, 2000, 1000], [0.35, 0.3, 0.25])
+        pain = OptionsDataService._compute_max_pain(calls, puts)
+        self.assertIsNotNone(pain)
+        self.assertIn(pain, [95.0, 100.0, 105.0])
+
+    def test_empty_strikes_returns_none(self):
+        import pandas as pd
+        calls = pd.DataFrame({'strike': [], 'volume': [], 'openInterest': [], 'impliedVolatility': []})
+        puts = pd.DataFrame({'strike': [], 'volume': [], 'openInterest': [], 'impliedVolatility': []})
+        self.assertIsNone(OptionsDataService._compute_max_pain(calls, puts))
+
+
+class OptionsUnusualActivityTest(TestCase):
+    def test_detects_unusual(self):
+        # Volume > 5x OI and volume >= 100
+        calls = _make_options_df([100], [600], [100], [0.3])
+        puts = _make_options_df([95], [50], [500], [0.35])
+        unusual = OptionsDataService._detect_unusual_activity(calls, puts)
+        self.assertEqual(len(unusual), 1)
+        self.assertEqual(unusual[0]['type'], 'call')
+        self.assertEqual(unusual[0]['strike'], 100.0)
+
+    def test_no_unusual_when_ratio_low(self):
+        calls = _make_options_df([100], [200], [500], [0.3])
+        puts = _make_options_df([95], [100], [500], [0.35])
+        unusual = OptionsDataService._detect_unusual_activity(calls, puts)
+        self.assertEqual(len(unusual), 0)
+
+    def test_ignores_low_volume(self):
+        # High ratio but volume < 100
+        calls = _make_options_df([100], [50], [5], [0.3])
+        puts = _make_options_df([95], [10], [1], [0.35])
+        unusual = OptionsDataService._detect_unusual_activity(calls, puts)
+        self.assertEqual(len(unusual), 0)
+
+
+class OptionsScoreTest(TestCase):
+    def test_high_pc_ratio_scores_high(self):
+        # Contrarian: high P/C = fear = bullish = high score
+        score = OptionsDataService._compute_options_score(2.0, 1.5, 0.10)
+        self.assertGreater(score, 65)
+
+    def test_low_pc_ratio_scores_low(self):
+        score = OptionsDataService._compute_options_score(0.3, 0.5, -0.10)
+        self.assertLess(score, 35)
+
+    def test_neutral_score(self):
+        score = OptionsDataService._compute_options_score(1.0, 1.0, 0.0)
+        self.assertEqual(score, 50)
+
+    def test_none_inputs_returns_default(self):
+        score = OptionsDataService._compute_options_score(None, None, None)
+        self.assertEqual(score, 50)
+
+    def test_partial_data(self):
+        # Only volume ratio available
+        score = OptionsDataService._compute_options_score(1.5, None, None)
+        self.assertGreater(score, 50)
+
+    def test_signal_buy(self):
+        self.assertEqual(OptionsDataService._options_signal(80), 'buy')
+
+    def test_signal_sell(self):
+        self.assertEqual(OptionsDataService._options_signal(20), 'sell')
+
+    def test_signal_hold(self):
+        self.assertEqual(OptionsDataService._options_signal(50), 'hold')
+
+
+class OptionsFetchIntegrationTest(TestCase):
+    @patch('market.services.yf.Ticker')
+    def test_fetch_no_options_returns_none(self, mock_ticker_cls):
+        mock_stock = MagicMock()
+        mock_stock.options = ()
+        mock_ticker_cls.return_value = mock_stock
+        result = OptionsDataService.fetch_options_data('NOOPT')
+        self.assertIsNone(result)
+
+    @patch('market.services.yf.Ticker')
+    def test_fetch_returns_metrics(self, mock_ticker_cls):
+        import pandas as pd
+
+        calls_df = _make_options_df(
+            [105, 110, 115], [200, 150, 100], [1000, 800, 500], [0.25, 0.22, 0.20]
+        )
+        puts_df = _make_options_df(
+            [95, 90, 85], [300, 200, 100], [900, 700, 400], [0.35, 0.40, 0.45]
+        )
+        chain = MagicMock()
+        chain.calls = calls_df
+        chain.puts = puts_df
+
+        mock_stock = MagicMock()
+        mock_stock.options = ('2026-04-01',)
+        mock_stock.option_chain.return_value = chain
+        mock_stock.fast_info.last_price = 100.0
+        mock_ticker_cls.return_value = mock_stock
+
+        result = OptionsDataService.fetch_options_data('AAPL')
+        self.assertIsNotNone(result)
+        self.assertIn('put_call_volume_ratio', result)
+        self.assertIn('put_call_oi_ratio', result)
+        self.assertIn('iv_skew', result)
+        self.assertIn('max_pain', result)
+        self.assertIn('options_score', result)
+        self.assertIn('options_signal', result)
+        self.assertIsInstance(result['options_score'], int)
+        self.assertIn(result['options_signal'], ('buy', 'hold', 'sell'))

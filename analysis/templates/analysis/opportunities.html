@@ -221,6 +221,19 @@
                                             </span>
                                         </td>
                                     </tr>
+                                    {% with snap.ticker.options_snapshot as opts %}
+                                    {% if opts %}
+                                    <tr>
+                                        <td class="text-muted">Options</td>
+                                        <td class="text-end">{{ opts.options_score }}/100</td>
+                                        <td class="text-end">
+                                            <span class="badge {% if opts.options_signal == 'buy' %}bg-success{% elif opts.options_signal == 'sell' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                                {{ opts.options_signal }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endwith %}
                                 </tbody>
                             </table>
                         </div>
