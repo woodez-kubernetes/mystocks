@@ -13,6 +13,9 @@ urlpatterns = [
     path('portfolios/<int:pk>/edit/', views.portfolio_edit, name='portfolio_edit'),
     path('portfolios/<int:pk>/delete/', views.portfolio_delete, name='portfolio_delete'),
 
+    # Portfolio AI Analysis
+    path('portfolios/<int:pk>/analyze/', views.generate_portfolio_analysis, name='generate_portfolio_analysis'),
+
     # Lot CRUD
     path('portfolios/<int:portfolio_pk>/lots/add/', views.lot_create, name='lot_create'),
     path('lots/<int:pk>/edit/', views.lot_edit, name='lot_edit'),

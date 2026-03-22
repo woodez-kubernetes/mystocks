@@ -7,10 +7,10 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot
-from analysis.services import AIAnalysisService, TechnicalIndicatorService
+from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot, PortfolioAnalysis
+from analysis.services import AIAnalysisService, PortfolioAnalysisService, TechnicalIndicatorService
 from market.models import NewsArticle, PriceHistory
-from portfolio.models import Ticker
+from portfolio.models import Lot, Portfolio, Ticker, WatchlistItem
 
 
 class LoggedInTestCase(TestCase):
@@ -825,3 +825,203 @@ class PriceTargetInComputeIndicatorsTest(TestCase):
         snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
         self.assertIsNotNone(snapshot.buy_target)
         self.assertIsNotNone(snapshot.sell_target)
+
+
+class PortfolioAnalysisModelTest(TestCase):
+    def test_str(self):
+        portfolio = Portfolio.objects.create(name='Test Portfolio')
+        analysis = PortfolioAnalysis.objects.create(
+            portfolio=portfolio,
+            top_picks_text='Pick 1...',
+            portfolio_analysis_text='Overall...',
+        )
+        self.assertIn('Test Portfolio', str(analysis))
+
+    def test_one_to_one(self):
+        portfolio = Portfolio.objects.create(name='Test Portfolio')
+        PortfolioAnalysis.objects.create(portfolio=portfolio)
+        with self.assertRaises(Exception):
+            PortfolioAnalysis.objects.create(portfolio=portfolio)
+
+
+class PortfolioAnalysisServiceTest(TestCase):
+    def setUp(self):
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.ticker1 = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('180.00'), sector='Technology',
+            week_52_high=Decimal('200.00'), week_52_low=Decimal('140.00'),
+        )
+        self.ticker2 = Ticker.objects.create(
+            symbol='MSFT', company_name='Microsoft',
+            last_price=Decimal('350.00'), sector='Technology',
+            week_52_high=Decimal('400.00'), week_52_low=Decimal('280.00'),
+        )
+        self.ticker3 = Ticker.objects.create(
+            symbol='JPM', company_name='JPMorgan',
+            last_price=Decimal('170.00'), sector='Financials',
+            week_52_high=Decimal('200.00'), week_52_low=Decimal('130.00'),
+        )
+        # Add lots to portfolio
+        Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker1,
+            shares=Decimal('10'), cost_basis=Decimal('150.00'),
+            purchase_date=date(2024, 1, 1),
+        )
+        Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker2,
+            shares=Decimal('5'), cost_basis=Decimal('300.00'),
+            purchase_date=date(2024, 1, 1),
+        )
+        # Add ticker3 to watchlist only
+        WatchlistItem.objects.create(ticker=self.ticker3)
+
+        # Create indicator snapshots
+        IndicatorSnapshot.objects.create(ticker=self.ticker1, opportunity_score=80)
+        IndicatorSnapshot.objects.create(ticker=self.ticker2, opportunity_score=60)
+        IndicatorSnapshot.objects.create(ticker=self.ticker3, opportunity_score=90)
+
+    def test_gather_candidates_includes_portfolio_and_watchlist(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        symbols = {c['ticker'].symbol for c in candidates}
+        self.assertIn('AAPL', symbols)
+        self.assertIn('MSFT', symbols)
+        self.assertIn('JPM', symbols)
+
+    def test_gather_candidates_flags_source(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        by_symbol = {c['ticker'].symbol: c for c in candidates}
+        self.assertTrue(by_symbol['AAPL']['in_portfolio'])
+        self.assertFalse(by_symbol['AAPL']['in_watchlist'])
+        self.assertFalse(by_symbol['JPM']['in_portfolio'])
+        self.assertTrue(by_symbol['JPM']['in_watchlist'])
+
+    def test_pick_top_2(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        top = PortfolioAnalysisService._pick_top_2(candidates)
+        self.assertEqual(len(top), 2)
+        # Top 2 should be JPM (90) and AAPL (80)
+        symbols = [c['ticker'].symbol for c in top]
+        self.assertEqual(symbols[0], 'JPM')
+        self.assertEqual(symbols[1], 'AAPL')
+
+    def test_build_ticker_summary(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        aapl = next(c for c in candidates if c['ticker'].symbol == 'AAPL')
+        summary = PortfolioAnalysisService._build_ticker_summary(aapl)
+        self.assertIn('AAPL', summary)
+        self.assertIn('Apple', summary)
+        self.assertIn('Opportunity score: 80', summary)
+        self.assertIn('in portfolio', summary)
+
+    def test_build_top_picks_prompt(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        top = PortfolioAnalysisService._pick_top_2(candidates)
+        prompt = PortfolioAnalysisService._build_top_picks_prompt(top, self.portfolio)
+        self.assertIn('PICK #1', prompt)
+        self.assertIn('PICK #2', prompt)
+        self.assertIn('Test Portfolio', prompt)
+
+    def test_build_portfolio_analysis_prompt(self):
+        candidates = PortfolioAnalysisService._gather_candidates(self.portfolio)
+        holdings = self.portfolio.get_holdings()
+        prompt = PortfolioAnalysisService._build_portfolio_analysis_prompt(
+            candidates, self.portfolio, holdings
+        )
+        self.assertIn('Test Portfolio', prompt)
+        self.assertIn('AAPL', prompt)
+        self.assertIn('MSFT', prompt)
+        self.assertIn('Watchlist', prompt)
+        self.assertIn('JPM', prompt)
+
+    @patch('analysis.services.ollama')
+    def test_generate_analysis(self, mock_ollama_module):
+        mock_client = MagicMock()
+        mock_client.chat.return_value = {
+            'message': {'content': 'Test analysis output.'}
+        }
+        mock_ollama_module.Client.return_value = mock_client
+
+        result = PortfolioAnalysisService.generate_analysis(self.portfolio, force=True)
+        self.assertIsNotNone(result)
+        self.assertEqual(PortfolioAnalysis.objects.count(), 1)
+        self.assertIn('JPM', result.top_pick_symbols)
+        self.assertIn('AAPL', result.top_pick_symbols)
+        # Two LLM calls: picks + portfolio analysis
+        self.assertEqual(mock_client.chat.call_count, 2)
+
+    @patch('analysis.services.ollama')
+    def test_generate_skips_unchanged(self, mock_ollama_module):
+        mock_client = MagicMock()
+        mock_client.chat.return_value = {
+            'message': {'content': 'Analysis.'}
+        }
+        mock_ollama_module.Client.return_value = mock_client
+
+        # First call
+        result1 = PortfolioAnalysisService.generate_analysis(self.portfolio, force=True)
+        # Second call without force — should skip
+        result2 = PortfolioAnalysisService.generate_analysis(self.portfolio, force=False)
+        self.assertEqual(result1.pk, result2.pk)
+        # Only 2 LLM calls (from first invocation)
+        self.assertEqual(mock_client.chat.call_count, 2)
+
+    @patch('analysis.services.ollama')
+    def test_connection_error_returns_none(self, mock_ollama_module):
+        mock_ollama_module.Client.side_effect = ConnectionError("refused")
+        result = PortfolioAnalysisService.generate_analysis(self.portfolio, force=True)
+        self.assertIsNone(result)
+
+
+class PortfolioAnalysisViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.portfolio = Portfolio.objects.create(name='View Test')
+        self.ticker = Ticker.objects.create(
+            symbol='TEST', last_price=Decimal('100.00'),
+        )
+        Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker,
+            shares=Decimal('10'), cost_basis=Decimal('90.00'),
+            purchase_date=date(2024, 6, 1),
+        )
+        IndicatorSnapshot.objects.create(ticker=self.ticker, opportunity_score=75)
+
+    def test_portfolio_detail_shows_analyze_button(self):
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ask Kevin to Analyze Portfolio')
+
+    def test_portfolio_detail_shows_existing_analysis(self):
+        PortfolioAnalysis.objects.create(
+            portfolio=self.portfolio,
+            top_picks_text='TEST is a strong pick because...',
+            top_pick_symbols=['TEST'],
+            portfolio_analysis_text='Overall the portfolio looks healthy.',
+        )
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Top Picks to Add To')
+        self.assertContains(response, 'TEST is a strong pick because')
+        self.assertContains(response, 'Portfolio Analysis')
+        self.assertContains(response, 'Overall the portfolio looks healthy')
+
+    @patch('analysis.services.ollama')
+    def test_generate_endpoint(self, mock_ollama_module):
+        mock_client = MagicMock()
+        mock_client.chat.return_value = {
+            'message': {'content': 'Kevin says portfolio looks great.'}
+        }
+        mock_ollama_module.Client.return_value = mock_client
+
+        response = self.client.post(
+            reverse('generate_portfolio_analysis', args=[self.portfolio.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PortfolioAnalysis.objects.count(), 1)
+
+    def test_generate_endpoint_requires_post(self):
+        response = self.client.get(
+            reverse('generate_portfolio_analysis', args=[self.portfolio.pk])
+        )
+        self.assertEqual(response.status_code, 405)
