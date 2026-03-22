@@ -23,6 +23,7 @@ urlpatterns = [
 
     # API
     path('api/tickers/search/', views.ticker_search, name='ticker_search'),
+    path('api/portfolios/<int:pk>/growth/', views.portfolio_growth_data, name='portfolio_growth_data'),
 
     # Report
     path('report/send/', views.send_email_report, name='send_email_report'),

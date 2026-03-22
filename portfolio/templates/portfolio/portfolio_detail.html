@@ -93,6 +93,20 @@
     </div>
 </div>
 
+<!-- Portfolio Growth Chart -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>52-Week Growth vs Indices</h5>
+        <span id="growth-chart-spinner" class="spinner-border spinner-border-sm text-muted" style="display:none;"></span>
+    </div>
+    <div class="card-body">
+        <canvas id="growthChart" height="100"></canvas>
+        <p id="growth-chart-empty" class="text-muted text-center my-4" style="display:none;">
+            No historical data available for chart.
+        </p>
+    </div>
+</div>
+
 <!-- Portfolio AI Analysis (Top Picks + Overall) -->
 {% include "portfolio/partials/portfolio_analysis_section.html" %}
 
@@ -112,13 +126,111 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 document.body.addEventListener('htmx:afterRequest', function(event) {
-    // Close modal after successful form submission
     if (event.detail.successful && event.detail.target.id === 'holdings-container') {
         var modal = bootstrap.Modal.getInstance(document.getElementById('formModal'));
         if (modal) modal.hide();
     }
 });
+
+// Portfolio Growth Chart
+(function() {
+    const spinner = document.getElementById('growth-chart-spinner');
+    const canvas = document.getElementById('growthChart');
+    const emptyMsg = document.getElementById('growth-chart-empty');
+    spinner.style.display = '';
+
+    fetch("{% url 'portfolio_growth_data' portfolio.pk %}")
+        .then(r => r.json())
+        .then(data => {
+            spinner.style.display = 'none';
+            if (!data.labels || data.labels.length === 0) {
+                canvas.style.display = 'none';
+                emptyMsg.style.display = '';
+                return;
+            }
+
+            const colors = {
+                'Portfolio': {border: '#0d6efd', bg: 'rgba(13,110,253,0.08)'},
+                'S&P 500':  {border: '#6c757d', bg: 'transparent'},
+                'NASDAQ':   {border: '#fd7e14', bg: 'transparent'},
+                'Dow Jones': {border: '#6f42c1', bg: 'transparent'},
+            };
+
+            const datasets = [{
+                label: 'Portfolio',
+                data: data.portfolio,
+                borderColor: colors['Portfolio'].border,
+                backgroundColor: colors['Portfolio'].bg,
+                borderWidth: 2.5,
+                fill: true,
+                pointRadius: 0,
+                tension: 0.3,
+            }];
+
+            for (const [name, values] of Object.entries(data.indices)) {
+                const c = colors[name] || {border: '#adb5bd', bg: 'transparent'};
+                datasets.push({
+                    label: name,
+                    data: values,
+                    borderColor: c.border,
+                    backgroundColor: c.bg,
+                    borderWidth: 1.5,
+                    borderDash: [5, 3],
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.3,
+                });
+            }
+
+            new Chart(canvas, {
+                type: 'line',
+                data: {labels: data.labels, datasets: datasets},
+                options: {
+                    responsive: true,
+                    interaction: {mode: 'index', intersect: false},
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                title: function(items) {
+                                    return new Date(items[0].label).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+                                },
+                                label: function(ctx) {
+                                    const v = ctx.parsed.y;
+                                    return ctx.dataset.label + ': ' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+                                }
+                            }
+                        },
+                        legend: {position: 'top'},
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxTicksLimit: 12,
+                                callback: function(val, idx) {
+                                    const d = new Date(this.getLabelForValue(val));
+                                    return d.toLocaleDateString('en-US', {month: 'short', year: '2-digit'});
+                                }
+                            },
+                            grid: {display: false},
+                        },
+                        y: {
+                            ticks: {
+                                callback: function(v) { return (v >= 0 ? '+' : '') + v + '%'; }
+                            },
+                            grid: {color: 'rgba(0,0,0,0.05)'},
+                        }
+                    }
+                }
+            });
+        })
+        .catch(() => {
+            spinner.style.display = 'none';
+            canvas.style.display = 'none';
+            emptyMsg.style.display = '';
+        });
+})();
 </script>
 {% endblock %}

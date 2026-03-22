@@ -212,6 +212,87 @@ def generate_portfolio_analysis(request, pk):
     })
 
 
+# --- Portfolio Growth Chart API ---
+
+def portfolio_growth_data(request, pk):
+    """JSON API: 52-week portfolio growth vs major indices (% return)."""
+    import yfinance as yf
+
+    portfolio = get_object_or_404(Portfolio, pk=pk)
+    holdings = portfolio.get_holdings()
+
+    if not holdings:
+        return JsonResponse({'labels': [], 'portfolio': [], 'indices': {}})
+
+    # Build {symbol: total_shares} map
+    ticker_shares = {}
+    for h in holdings:
+        ticker_shares[h['ticker'].symbol] = float(h['total_shares'])
+
+    # Fetch 1Y history for each holding
+    symbols = list(ticker_shares.keys())
+    all_histories = {}
+    for symbol in symbols:
+        try:
+            stock = yf.Ticker(symbol)
+            df = stock.history(period='1y')
+            if not df.empty:
+                all_histories[symbol] = df['Close']
+        except Exception:
+            pass
+
+    if not all_histories:
+        return JsonResponse({'labels': [], 'portfolio': [], 'indices': {}})
+
+    # Build a common date index from all histories
+    import pandas as pd
+    combined = pd.DataFrame(all_histories)
+    combined = combined.dropna(how='all').ffill()
+
+    # Calculate daily portfolio value
+    daily_value = pd.Series(0.0, index=combined.index)
+    for symbol, shares in ticker_shares.items():
+        if symbol in combined.columns:
+            daily_value += combined[symbol].fillna(0) * shares
+
+    # Normalize to % return from first valid day
+    first_val = daily_value.iloc[0]
+    if first_val and first_val > 0:
+        portfolio_pct = ((daily_value / first_val) - 1) * 100
+    else:
+        portfolio_pct = daily_value * 0
+
+    # Fetch major indices
+    index_symbols = {
+        '^GSPC': 'S&P 500',
+        '^IXIC': 'NASDAQ',
+        '^DJI': 'Dow Jones',
+    }
+    indices_data = {}
+    for idx_symbol, idx_name in index_symbols.items():
+        try:
+            idx = yf.Ticker(idx_symbol)
+            df = idx.history(period='1y')
+            if not df.empty:
+                close = df['Close'].reindex(combined.index, method='ffill').dropna()
+                if len(close) > 0:
+                    first = close.iloc[0]
+                    indices_data[idx_name] = [
+                        round(((v / first) - 1) * 100, 2) for v in close
+                    ]
+        except Exception:
+            pass
+
+    labels = [d.strftime('%Y-%m-%d') for d in combined.index]
+    portfolio_values = [round(v, 2) for v in portfolio_pct]
+
+    return JsonResponse({
+        'labels': labels,
+        'portfolio': portfolio_values,
+        'indices': indices_data,
+    })
+
+
 # --- Ticker Search API ---
 
 def ticker_search(request):
