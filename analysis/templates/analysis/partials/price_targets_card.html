@@ -1,0 +1,105 @@
+{% if indicators and indicators.buy_target and indicators.sell_target %}
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Price Target Range</h5>
+    </div>
+    <div class="card-body">
+        <div class="row align-items-center">
+            <!-- Buy Target -->
+            <div class="col-md-3 text-center">
+                <small class="text-muted d-block mb-1">Buy Target (Support)</small>
+                <h4 class="text-success mb-0">${{ indicators.buy_target|floatformat:2 }}</h4>
+                {% if ticker.last_price and indicators.buy_target %}
+                    <small class="text-muted">
+                        {% if ticker.last_price > indicators.buy_target %}
+                            {{ ticker.last_price|floatformat:2 }} is above
+                        {% else %}
+                            At support level
+                        {% endif %}
+                    </small>
+                {% endif %}
+            </div>
+
+            <!-- Visual Range Bar -->
+            <div class="col-md-6">
+                <div class="position-relative my-3" style="height: 40px;">
+                    {% if ticker.last_price and indicators.buy_target and indicators.sell_target %}
+                        <div class="d-flex align-items-center h-100">
+                            <div class="flex-grow-1 position-relative">
+                                <!-- Range bar background -->
+                                <div class="rounded" style="height: 8px; background: linear-gradient(to right, #198754, #ffc107, #dc3545);"></div>
+                                <!-- Current price marker -->
+                                <div class="position-absolute" style="
+                                    top: -6px;
+                                    left: {% widthratio ticker.last_price indicators.sell_target 100 %}%;
+                                    transform: translateX(-50%);
+                                ">
+                                    <div class="text-center">
+                                        <div style="width: 3px; height: 20px; background: #0d6efd; margin: 0 auto;"></div>
+                                        <small class="fw-bold text-primary">${{ ticker.last_price|floatformat:2 }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="d-flex justify-content-between">
+                    <small class="text-success">Support</small>
+                    <small class="text-muted">Current Price</small>
+                    <small class="text-danger">Resistance</small>
+                </div>
+            </div>
+
+            <!-- Sell Target -->
+            <div class="col-md-3 text-center">
+                <small class="text-muted d-block mb-1">Sell Target (Resistance)</small>
+                <h4 class="text-danger mb-0">${{ indicators.sell_target|floatformat:2 }}</h4>
+                {% if ticker.last_price and indicators.sell_target %}
+                    <small class="text-muted">
+                        {% if ticker.last_price < indicators.sell_target %}
+                            {{ ticker.last_price|floatformat:2 }} is below
+                        {% else %}
+                            At resistance level
+                        {% endif %}
+                    </small>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if indicators.buy_target and indicators.sell_target and ticker.last_price %}
+        <div class="row g-2 mt-3">
+            <div class="col-6 col-md-3">
+                <div class="bg-light rounded p-2 text-center">
+                    <small class="text-muted d-block">Sell Target</small>
+                    <span class="fw-bold text-danger">${{ indicators.sell_target|floatformat:2 }}</span>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="bg-light rounded p-2 text-center">
+                    <small class="text-muted d-block">Buy Target</small>
+                    <span class="fw-bold text-success">${{ indicators.buy_target|floatformat:2 }}</span>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="bg-light rounded p-2 text-center">
+                    <small class="text-muted d-block">Trading Range</small>
+                    <span class="fw-bold">${{ indicators.buy_target|floatformat:0 }} &ndash; ${{ indicators.sell_target|floatformat:0 }}</span>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="bg-light rounded p-2 text-center">
+                    <small class="text-muted d-block">Max Pain</small>
+                    {% if options_snapshot and options_snapshot.max_pain %}
+                        <span class="fw-bold">${{ options_snapshot.max_pain|floatformat:2 }}</span>
+                    {% else %}
+                        <span class="text-muted">N/A</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <small class="text-muted d-block mt-2">Based on Bollinger Bands, SMAs, 52-week range{% if options_snapshot and options_snapshot.max_pain %}, and options max pain{% endif %}. Not financial advice.</small>
+    </div>
+</div>
+{% endif %}
