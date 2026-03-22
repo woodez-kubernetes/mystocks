@@ -32,9 +32,17 @@ def portfolio_list(request):
 def portfolio_detail(request, pk):
     portfolio = get_object_or_404(Portfolio, pk=pk)
     holdings = portfolio.get_holdings()
+
+    # Portfolio AI analysis (if previously generated)
+    try:
+        portfolio_analysis = portfolio.ai_portfolio_analysis
+    except Exception:
+        portfolio_analysis = None
+
     context = {
         'portfolio': portfolio,
         'holdings': holdings,
+        'portfolio_analysis': portfolio_analysis,
     }
     return render(request, 'portfolio/portfolio_detail.html', context)
 
@@ -185,6 +193,22 @@ def lot_delete(request, pk):
         'delete_url': 'lot_delete',
         'delete_url_pk': lot.pk,
         'portfolio': portfolio,
+    })
+
+
+# --- Portfolio AI Analysis ---
+
+@require_POST
+def generate_portfolio_analysis(request, pk):
+    """HTMX endpoint: generate portfolio-level AI analysis on demand."""
+    portfolio = get_object_or_404(Portfolio, pk=pk)
+
+    from analysis.services import PortfolioAnalysisService
+    portfolio_analysis = PortfolioAnalysisService.generate_analysis(portfolio, force=True)
+
+    return render(request, 'portfolio/partials/portfolio_analysis_section.html', {
+        'portfolio': portfolio,
+        'portfolio_analysis': portfolio_analysis,
     })
 
 

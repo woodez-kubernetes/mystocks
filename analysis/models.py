@@ -123,3 +123,21 @@ class AIAnalysis(models.Model):
 
     def __str__(self):
         return f'{self.ticker.symbol} AI analysis ({self.generated_at})'
+
+
+class PortfolioAnalysis(models.Model):
+    portfolio = models.OneToOneField(
+        'portfolio.Portfolio', on_delete=models.CASCADE, related_name='ai_portfolio_analysis'
+    )
+    top_picks_text = models.TextField(blank=True)
+    top_pick_symbols = models.JSONField(default=list, blank=True)
+    portfolio_analysis_text = models.TextField(blank=True)
+    model_name = models.CharField(max_length=100, default='llama3.2:1b')
+    generated_at = models.DateTimeField(auto_now=True)
+    prompt_hash = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        verbose_name_plural = 'Portfolio analyses'
+
+    def __str__(self):
+        return f'{self.portfolio.name} portfolio analysis ({self.generated_at})'

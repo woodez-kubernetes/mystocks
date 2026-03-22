@@ -9,7 +9,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator
 from ta.volatility import BollingerBands
 
-from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot
+from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot, PortfolioAnalysis
 from market.models import PriceHistory
 
 logger = logging.getLogger(__name__)
@@ -530,4 +530,299 @@ class AIAnalysisService:
             },
         )
         logger.info(f"{ticker.symbol}: AI analysis generated ({len(analysis_text)} chars)")
+        return analysis_obj
+
+
+class PortfolioAnalysisService:
+
+    @staticmethod
+    def _gather_candidates(portfolio):
+        """Gather all tickers from portfolio holdings and watchlist with their data."""
+        from portfolio.models import Ticker, WatchlistItem
+        from market.models import NewsArticle
+
+        # Portfolio tickers
+        portfolio_symbols = set(
+            portfolio.lots.values_list('ticker__symbol', flat=True).distinct()
+        )
+
+        # Watchlist tickers
+        watchlist_symbols = set(
+            WatchlistItem.objects.values_list('ticker__symbol', flat=True)
+        )
+
+        all_symbols = portfolio_symbols | watchlist_symbols
+        tickers = Ticker.objects.filter(symbol__in=all_symbols)
+
+        candidates = []
+        for ticker in tickers:
+            try:
+                indicators = ticker.indicators
+            except IndicatorSnapshot.DoesNotExist:
+                indicators = None
+
+            try:
+                opts = ticker.options_snapshot
+            except OptionsSnapshot.DoesNotExist:
+                opts = None
+
+            news = list(NewsArticle.objects.filter(ticker=ticker).order_by('-published_at')[:3])
+
+            candidates.append({
+                'ticker': ticker,
+                'indicators': indicators,
+                'options': opts,
+                'news': news,
+                'in_portfolio': ticker.symbol in portfolio_symbols,
+                'in_watchlist': ticker.symbol in watchlist_symbols,
+            })
+        return candidates
+
+    @staticmethod
+    def _pick_top_2(candidates):
+        """Select the top 2 stocks by opportunity score."""
+        scored = [
+            c for c in candidates
+            if c['indicators'] and c['indicators'].opportunity_score is not None
+        ]
+        scored.sort(key=lambda c: c['indicators'].opportunity_score, reverse=True)
+        return scored[:2]
+
+    @staticmethod
+    def _build_ticker_summary(c):
+        """Build a text summary for a single candidate ticker."""
+        t = c['ticker']
+        ind = c['indicators']
+        opts = c['options']
+
+        lines = [f"{t.symbol} ({t.company_name or 'N/A'}) - ${t.last_price}"]
+        lines.append(f"  Sector: {t.sector or 'Unknown'}")
+
+        if t.day_change_pct is not None:
+            lines.append(f"  Day change: {'+' if t.day_change_pct >= 0 else ''}{t.day_change_pct}%")
+        if t.pe_ratio:
+            lines.append(f"  P/E: {t.pe_ratio}")
+        if t.market_cap:
+            cap_b = float(t.market_cap) / 1_000_000_000
+            lines.append(f"  Market cap: ${cap_b:.1f}B")
+        if t.week_52_high and t.week_52_low:
+            lines.append(f"  52-week range: ${t.week_52_low} - ${t.week_52_high}")
+
+        if ind:
+            lines.append(f"  Opportunity score: {ind.opportunity_score}/100")
+            lines.append(f"  RSI: {ind.rsi} ({ind.rsi_signal}), MACD: {ind.macd_signal}, BB: {ind.bb_signal}")
+            lines.append(f"  SMA: {ind.sma_signal} (50=${ind.sma_50}, 200=${ind.sma_200})")
+            lines.append(f"  Volume: {ind.volume_ratio}x ({ind.volume_signal})")
+            if ind.sentiment_score is not None:
+                lines.append(f"  Sentiment: {ind.sentiment_score} ({ind.sentiment_signal})")
+            if ind.buy_target and ind.sell_target:
+                lines.append(f"  Price targets: Buy=${ind.buy_target}, Sell=${ind.sell_target}")
+
+        if opts:
+            lines.append(f"  Options: P/C vol={opts.put_call_volume_ratio}, OI={opts.put_call_oi_ratio}, "
+                         f"IV skew={opts.iv_skew}, Max pain=${opts.max_pain}, "
+                         f"Score={opts.options_score}/100 ({opts.options_signal})")
+            if opts.has_unusual_activity:
+                lines.append(f"  ** Unusual options activity detected")
+
+        source = []
+        if c['in_portfolio']:
+            source.append("in portfolio")
+        if c['in_watchlist']:
+            source.append("on watchlist")
+        lines.append(f"  Source: {', '.join(source)}")
+
+        if c['news']:
+            lines.append("  Recent headlines:")
+            for article in c['news']:
+                sentiment = f" [{article.sentiment_label}]" if article.sentiment_label else ""
+                lines.append(f"    - {article.title[:80]}{sentiment}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_top_picks_prompt(top_picks, portfolio):
+        """Build prompt for top 2 stock picks analysis."""
+        lines = [
+            f"You are analyzing the '{portfolio.name}' portfolio. From all stocks in this portfolio "
+            f"and watchlist, these 2 stocks have the highest opportunity scores and are the best "
+            f"candidates to increase position size.",
+            "",
+            "For each stock, provide a detailed investment case (3-5 sentences) explaining:",
+            "- Why the technical indicators support adding to this position",
+            "- What the options market sentiment tells us (contrarian view)",
+            "- Key support/resistance levels from the price targets",
+            "- Any catalysts or risks from recent news",
+            "- A specific entry strategy (e.g., accumulate near support at $X)",
+            "",
+        ]
+
+        for i, c in enumerate(top_picks, 1):
+            lines.append(f"--- PICK #{i} ---")
+            lines.append(PortfolioAnalysisService._build_ticker_summary(c))
+            lines.append("")
+
+        lines.extend([
+            "Format your response as:",
+            "PICK 1: [SYMBOL]",
+            "[detailed case]",
+            "",
+            "PICK 2: [SYMBOL]",
+            "[detailed case]",
+            "",
+            "Be specific with numbers and price levels. Do not give financial advice. "
+            "State observations and data-driven reasoning only.",
+        ])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_portfolio_analysis_prompt(candidates, portfolio, holdings):
+        """Build prompt for overall portfolio analysis."""
+        lines = [
+            f"Analyze the '{portfolio.name}' portfolio as a whole. Provide a comprehensive "
+            f"4-6 sentence analysis covering portfolio composition, diversification, "
+            f"overall technical health, and outlook.",
+            "",
+            "Portfolio summary:",
+            f"- Total cost: ${portfolio.total_cost}",
+        ]
+        if portfolio.total_value:
+            lines.append(f"- Market value: ${portfolio.total_value}")
+        if portfolio.total_gain_loss is not None:
+            lines.append(f"- Total gain/loss: ${portfolio.total_gain_loss} ({portfolio.total_gain_loss_pct:.1f}%)")
+
+        # Sector breakdown
+        sectors = {}
+        for c in candidates:
+            if c['in_portfolio']:
+                sector = c['ticker'].sector or 'Unknown'
+                sectors[sector] = sectors.get(sector, 0) + 1
+        if sectors:
+            lines.append(f"- Sectors: {', '.join(f'{s} ({n})' for s, n in sorted(sectors.items()))}")
+
+        # Avg opportunity score
+        scored = [c for c in candidates if c['in_portfolio'] and c['indicators']]
+        if scored:
+            avg_score = sum(c['indicators'].opportunity_score for c in scored) / len(scored)
+            buy_count = sum(1 for c in scored if c['indicators'].opportunity_score >= 70)
+            sell_count = sum(1 for c in scored if c['indicators'].opportunity_score < 40)
+            lines.append(f"- Avg opportunity score: {avg_score:.0f}/100 ({buy_count} buy signals, {sell_count} sell signals)")
+
+        lines.extend(["", "Holdings:"])
+        for c in candidates:
+            if c['in_portfolio']:
+                lines.append(PortfolioAnalysisService._build_ticker_summary(c))
+                lines.append("")
+
+        # Watchlist context
+        watchlist_candidates = [c for c in candidates if c['in_watchlist'] and not c['in_portfolio']]
+        if watchlist_candidates:
+            lines.extend(["Watchlist (not yet in portfolio):"])
+            for c in watchlist_candidates:
+                lines.append(PortfolioAnalysisService._build_ticker_summary(c))
+                lines.append("")
+
+        lines.extend([
+            "Provide a 4-6 sentence portfolio analysis covering:",
+            "- Overall portfolio health and performance",
+            "- Sector concentration or diversification gaps",
+            "- Which holdings are strongest/weakest based on technicals and options",
+            "- Key risks to watch (earnings, macro, sector-specific)",
+            "- Any rebalancing considerations",
+            "",
+            "Be specific. Reference actual ticker symbols, scores, and price levels. "
+            "Do not give financial advice. State observations only.",
+        ])
+        return "\n".join(lines)
+
+    @staticmethod
+    def generate_analysis(portfolio, force=False):
+        """Generate top picks and portfolio analysis. Returns PortfolioAnalysis or None."""
+        holdings = portfolio.get_holdings()
+        candidates = PortfolioAnalysisService._gather_candidates(portfolio)
+        top_picks = PortfolioAnalysisService._pick_top_2(candidates)
+
+        if not candidates:
+            logger.info(f"Portfolio '{portfolio.name}': no candidates for analysis")
+            return None
+
+        # Build prompts
+        picks_prompt = ""
+        if top_picks:
+            picks_prompt = PortfolioAnalysisService._build_top_picks_prompt(top_picks, portfolio)
+        portfolio_prompt = PortfolioAnalysisService._build_portfolio_analysis_prompt(
+            candidates, portfolio, holdings
+        )
+
+        combined_hash = hashlib.sha256(
+            (picks_prompt + portfolio_prompt).encode()
+        ).hexdigest()[:16]
+
+        # Skip if unchanged
+        if not force:
+            try:
+                existing = PortfolioAnalysis.objects.get(portfolio=portfolio)
+                if existing.prompt_hash == combined_hash:
+                    logger.info(f"Portfolio '{portfolio.name}': analysis unchanged, skipping")
+                    return existing
+            except PortfolioAnalysis.DoesNotExist:
+                pass
+
+        host = getattr(django_settings, 'OLLAMA_HOST', 'http://localhost:11434')
+        model = getattr(django_settings, 'OLLAMA_MODEL', 'llama3.2:1b')
+        timeout = getattr(django_settings, 'OLLAMA_TIMEOUT', 60)
+
+        system_msg = (
+            'You are a concise portfolio analyst. Provide factual, data-driven analysis '
+            'based on the technical indicators, options data, news, and metrics provided. '
+            'Never give buy/sell recommendations or financial advice.'
+        )
+
+        # Generate top picks analysis
+        top_picks_text = ""
+        top_pick_symbols = []
+        if picks_prompt:
+            try:
+                client = ollama.Client(host=host, timeout=timeout)
+                response = client.chat(
+                    model=model,
+                    messages=[
+                        {'role': 'system', 'content': system_msg},
+                        {'role': 'user', 'content': picks_prompt},
+                    ],
+                )
+                top_picks_text = response['message']['content'].strip()
+                top_pick_symbols = [c['ticker'].symbol for c in top_picks]
+            except Exception as e:
+                logger.error(f"Ollama error for portfolio picks: {e}")
+
+        # Generate portfolio analysis
+        portfolio_analysis_text = ""
+        try:
+            client = ollama.Client(host=host, timeout=timeout)
+            response = client.chat(
+                model=model,
+                messages=[
+                    {'role': 'system', 'content': system_msg},
+                    {'role': 'user', 'content': portfolio_prompt},
+                ],
+            )
+            portfolio_analysis_text = response['message']['content'].strip()
+        except Exception as e:
+            logger.error(f"Ollama error for portfolio analysis: {e}")
+
+        if not top_picks_text and not portfolio_analysis_text:
+            return None
+
+        analysis_obj, _ = PortfolioAnalysis.objects.update_or_create(
+            portfolio=portfolio,
+            defaults={
+                'top_picks_text': top_picks_text,
+                'top_pick_symbols': top_pick_symbols,
+                'portfolio_analysis_text': portfolio_analysis_text,
+                'model_name': model,
+                'prompt_hash': combined_hash,
+            },
+        )
+        logger.info(f"Portfolio '{portfolio.name}': analysis generated")
         return analysis_obj
