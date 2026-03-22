@@ -720,3 +720,108 @@ class OptionsRadarChartTest(LoggedInTestCase):
         response = self.client.get(reverse('radar_data', args=['TEST']))
         data = response.json()
         self.assertNotIn('Options', data['labels'])
+
+
+class PriceTargetCalculationTest(TestCase):
+    def test_basic_targets(self):
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=100.0,
+            bb_lower=90.0, bb_upper=110.0,
+            sma_50=105.0, sma_200=95.0,
+            week_52_high=Decimal('120.00'), week_52_low=Decimal('80.00'),
+            max_pain=98.0,
+        )
+        self.assertIsNotNone(buy)
+        self.assertIsNotNone(sell)
+        self.assertLess(buy, 100.0)
+        self.assertGreater(sell, 100.0)
+
+    def test_targets_with_none_price(self):
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=None,
+            bb_lower=90.0, bb_upper=110.0,
+            sma_50=105.0, sma_200=95.0,
+            week_52_high=None, week_52_low=None,
+        )
+        self.assertIsNone(buy)
+        self.assertIsNone(sell)
+
+    def test_max_pain_above_price_goes_to_sell(self):
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=100.0,
+            bb_lower=90.0, bb_upper=110.0,
+            sma_50=95.0, sma_200=92.0,
+            week_52_high=Decimal('120.00'), week_52_low=Decimal('80.00'),
+            max_pain=108.0,  # above current price
+        )
+        self.assertGreater(sell, 100.0)
+
+    def test_max_pain_below_price_goes_to_buy(self):
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=100.0,
+            bb_lower=90.0, bb_upper=110.0,
+            sma_50=105.0, sma_200=95.0,
+            week_52_high=Decimal('120.00'), week_52_low=Decimal('80.00'),
+            max_pain=92.0,  # below current price
+        )
+        self.assertLess(buy, 100.0)
+
+    def test_buy_target_clamped_below_price(self):
+        # All support levels above price should clamp buy target to 95% of price
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=50.0,
+            bb_lower=55.0, bb_upper=70.0,
+            sma_50=60.0, sma_200=58.0,
+            week_52_high=Decimal('75.00'), week_52_low=Decimal('52.00'),
+        )
+        self.assertLessEqual(buy, 50.0)
+
+    def test_sell_target_clamped_above_price(self):
+        # All resistance levels below price should clamp sell target to 105% of price
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=100.0,
+            bb_lower=70.0, bb_upper=90.0,
+            sma_50=85.0, sma_200=80.0,
+            week_52_high=Decimal('95.00'), week_52_low=Decimal('60.00'),
+        )
+        self.assertGreaterEqual(sell, 100.0)
+
+    def test_no_optional_data(self):
+        buy, sell = TechnicalIndicatorService._compute_price_targets(
+            price=100.0,
+            bb_lower=90.0, bb_upper=110.0,
+            sma_50=None, sma_200=None,
+            week_52_high=None, week_52_low=None,
+        )
+        self.assertIsNotNone(buy)
+        self.assertIsNotNone(sell)
+        self.assertAlmostEqual(buy, 90.0, places=0)
+        self.assertAlmostEqual(sell, 110.0, places=0)
+
+
+class PriceTargetInComputeIndicatorsTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(
+            symbol='TEST', last_price=Decimal('110.00'),
+            week_52_high=Decimal('130.00'), week_52_low=Decimal('80.00'),
+        )
+        _create_price_history(self.ticker, num_days=250)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=Decimal('0.1'))
+    def test_indicators_include_price_targets(self, mock_sentiment):
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        self.assertIsNotNone(snapshot)
+        self.assertIsNotNone(snapshot.buy_target)
+        self.assertIsNotNone(snapshot.sell_target)
+        self.assertLess(snapshot.buy_target, self.ticker.last_price)
+        self.assertGreater(snapshot.sell_target, self.ticker.last_price)
+
+    @patch('market.services.NewsService.get_aggregate_sentiment', return_value=Decimal('0.1'))
+    def test_price_targets_with_options_max_pain(self, mock_sentiment):
+        OptionsSnapshot.objects.create(
+            ticker=self.ticker, options_score=70, options_signal='buy',
+            max_pain=Decimal('105.00'),
+        )
+        snapshot = TechnicalIndicatorService.compute_indicators(self.ticker)
+        self.assertIsNotNone(snapshot.buy_target)
+        self.assertIsNotNone(snapshot.sell_target)

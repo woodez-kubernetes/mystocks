@@ -48,33 +48,36 @@
         </div>
 
         <h5>How the Score is Calculated</h5>
-        <p>The Opportunity Score is a <strong>weighted average</strong> of six sub-scores, each derived from a different technical indicator or data source. Each sub-score is normalized to a 0&ndash;100 scale, then combined using these weights:</p>
+        <p>The Opportunity Score is a <strong>weighted average</strong> of up to seven sub-scores, each derived from a different technical indicator or data source. Each sub-score is normalized to a 0&ndash;100 scale, then combined using these weights:</p>
 
         <div class="table-responsive">
             <table class="table table-bordered">
                 <thead class="table-light">
                     <tr>
                         <th>Indicator</th>
-                        <th class="text-center">Weight (with sentiment)</th>
-                        <th class="text-center">Weight (without sentiment)</th>
+                        <th class="text-center">Full Weight</th>
+                        <th class="text-center">No Options</th>
+                        <th class="text-center">No Sentiment</th>
+                        <th class="text-center">Technicals Only</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr><td>RSI (Relative Strength Index)</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
-                    <tr><td>MACD (Moving Average Convergence Divergence)</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
-                    <tr><td>Bollinger Bands</td><td class="text-center">15%</td><td class="text-center">20%</td></tr>
-                    <tr><td>SMA (Simple Moving Averages)</td><td class="text-center">25%</td><td class="text-center">25%</td></tr>
-                    <tr><td>Volume</td><td class="text-center">10%</td><td class="text-center">15%</td></tr>
-                    <tr><td>Sentiment (News)</td><td class="text-center">20%</td><td class="text-center">&mdash;</td></tr>
+                    <tr><td>RSI (Relative Strength Index)</td><td class="text-center">12%</td><td class="text-center">15%</td><td class="text-center">18%</td><td class="text-center">20%</td></tr>
+                    <tr><td>MACD (Moving Average Convergence Divergence)</td><td class="text-center">12%</td><td class="text-center">15%</td><td class="text-center">18%</td><td class="text-center">20%</td></tr>
+                    <tr><td>Bollinger Bands</td><td class="text-center">12%</td><td class="text-center">15%</td><td class="text-center">18%</td><td class="text-center">20%</td></tr>
+                    <tr><td>SMA (Simple Moving Averages)</td><td class="text-center">22%</td><td class="text-center">25%</td><td class="text-center">22%</td><td class="text-center">25%</td></tr>
+                    <tr><td>Volume</td><td class="text-center">10%</td><td class="text-center">10%</td><td class="text-center">12%</td><td class="text-center">15%</td></tr>
+                    <tr><td>Sentiment (News)</td><td class="text-center">17%</td><td class="text-center">20%</td><td class="text-center">&mdash;</td><td class="text-center">&mdash;</td></tr>
+                    <tr><td>Options Sentiment</td><td class="text-center">15%</td><td class="text-center">&mdash;</td><td class="text-center">12%</td><td class="text-center">&mdash;</td></tr>
                 </tbody>
             </table>
         </div>
-        <p class="text-muted"><small>When no news/sentiment data is available for a ticker, the other indicators are re-weighted proportionally (right column). SMA always carries the highest weight because trend direction is the strongest predictor of near-term price movement.</small></p>
+        <p class="text-muted"><small>Weights adjust automatically based on available data. "Full Weight" applies when sentiment, options, and all technicals are present. SMA always carries the highest weight because trend direction is the strongest predictor of near-term price movement.</small></p>
     </div>
 </div>
 
 <!-- Individual Indicators -->
-<h3 class="mb-3">The Six Indicators</h3>
+<h3 class="mb-3">The Seven Indicators</h3>
 
 <!-- RSI -->
 <div class="card summary-card mb-3">
@@ -194,13 +197,88 @@
     </div>
 </div>
 
+<!-- Options Sentiment -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Options Sentiment (Contrarian, 30-day expirations)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> Options chain data from Yahoo Finance is analyzed across near-term expirations (within 30 days) to gauge how market participants are positioning. This indicator uses a <strong>contrarian</strong> interpretation &mdash; excessive fear (heavy put buying) is treated as a buying opportunity, not a bearish signal.</p>
+
+        <p><strong>Three sub-metrics are combined:</strong></p>
+
+        <h6>1. Put/Call Volume Ratio (40% of options score)</h6>
+        <p>The ratio of total put volume to total call volume across near-term expirations.</p>
+        <ul>
+            <li><strong>Ratio above 1.0</strong> &rarr; More puts being traded than calls. Excessive fear in the market. <span class="badge bg-success">Contrarian Buy</span> &mdash; fear is often overdone.</li>
+            <li><strong>Ratio between 0.7 and 1.0</strong> &rarr; Balanced activity. <span class="badge bg-secondary">Neutral</span>.</li>
+            <li><strong>Ratio below 0.7</strong> &rarr; Heavy call buying, complacency. <span class="badge bg-danger">Contrarian Sell</span> &mdash; the crowd may be too bullish.</li>
+        </ul>
+
+        <h6>2. Put/Call Open Interest Ratio (35% of options score)</h6>
+        <p>Similar to volume ratio but measures <em>accumulated positions</em> rather than daily activity. Open interest changes more slowly and reflects where large/institutional traders have committed capital.</p>
+        <ul>
+            <li><strong>High OI ratio (&gt; 1.0)</strong> &rarr; Heavy put positioning = fear = <span class="badge bg-success">Contrarian Buy</span>.</li>
+            <li><strong>Low OI ratio (&lt; 0.7)</strong> &rarr; Heavy call positioning = complacency = <span class="badge bg-danger">Contrarian Sell</span>.</li>
+        </ul>
+
+        <h6>3. Implied Volatility Skew (25% of options score)</h6>
+        <p>Compares the average implied volatility of out-of-the-money (OTM) puts to OTM calls. When put IV is much higher than call IV, it means traders are paying a premium for downside protection.</p>
+        <ul>
+            <li><strong>Positive skew (put IV &gt; call IV)</strong> &rarr; Extreme hedging/fear = <span class="badge bg-success">Contrarian Buy</span>.</li>
+            <li><strong>Negative skew (call IV &gt; put IV)</strong> &rarr; Speculative call buying = <span class="badge bg-danger">Contrarian Sell</span>.</li>
+        </ul>
+
+        <p><strong>Sub-score formula:</strong> Weighted average of the three sub-metrics, each mapped to a 0&ndash;100 scale. A P/C ratio of 2.0 (extreme fear) maps to ~90; a ratio of 0.3 (extreme complacency) maps to ~10; 1.0 (neutral) maps to 50.</p>
+
+        <h6>Additional Metrics (displayed but not scored)</h6>
+        <ul>
+            <li><strong>Max Pain:</strong> The strike price where the most options expire worthless. Stock prices tend to gravitate toward max pain near expiration. Shown as a reference point on the ticker detail page.</li>
+            <li><strong>Unusual Activity:</strong> Flagged when any single contract has volume exceeding 5x its open interest with at least 100 contracts traded. This can signal large directional bets by informed traders.</li>
+        </ul>
+
+        <p><strong>Why contrarian?</strong> Research shows that extreme put/call ratios are often better used as contrarian indicators. When everyone is buying puts (fear), the selling is often overdone and a bounce follows. When everyone is buying calls (greed), the stock may be overextended.</p>
+
+        <div class="alert alert-info mb-0 py-2">
+            <small><strong>Note:</strong> Not all tickers have options. When options data is unavailable, the other indicators are re-weighted automatically and the options metric is excluded from the composite score.</small>
+        </div>
+    </div>
+</div>
+
+<!-- Price Target Range -->
+<div class="card summary-card mb-3">
+    <div class="card-header bg-white">
+        <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Price Target Range (Buy &amp; Sell Targets)</h5>
+    </div>
+    <div class="card-body">
+        <p><strong>What it measures:</strong> A computed price range showing potential buy and sell target zones based on all available data &mdash; technical indicators, Bollinger Bands, moving averages, options max pain, and the 52-week range.</p>
+
+        <p><strong>How it is calculated:</strong></p>
+        <ul>
+            <li><strong>Buy Target (support zone):</strong> Average of the Bollinger lower band, SMA 200 (if available), options max pain (if below current price), and the 52-week low adjusted toward current price. This represents where the stock is likely to find buying support.</li>
+            <li><strong>Sell Target (resistance zone):</strong> Average of the Bollinger upper band, SMA 50 (if above current price), options max pain (if above current price), and the 52-week high adjusted toward current price. This represents where the stock may face selling pressure.</li>
+        </ul>
+
+        <p><strong>How to read it:</strong></p>
+        <ul>
+            <li>If the current price is near or below the <strong>buy target</strong>, it may be a good entry point.</li>
+            <li>If the current price is near or above the <strong>sell target</strong>, consider taking profits.</li>
+            <li>The range between buy and sell targets indicates the expected near-term trading range.</li>
+        </ul>
+
+        <div class="alert alert-warning mb-0 py-2">
+            <small><strong>Important:</strong> Price targets are derived from technical data and represent likely support/resistance zones, not guaranteed price levels. They should be used as one input alongside fundamental analysis and your own research.</small>
+        </div>
+    </div>
+</div>
+
 <!-- Radar Chart -->
 <div class="card summary-card mb-4">
     <div class="card-header bg-white">
         <h4 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>The Radar Chart</h4>
     </div>
     <div class="card-body">
-        <p>On the Opportunities page, clicking a stock reveals a <strong>radar chart</strong> with six axes &mdash; one per indicator. Each axis shows the sub-score (0&ndash;100) for that indicator. A large, well-rounded shape means multiple indicators agree the stock is a good opportunity. A lopsided shape means only some indicators are favorable.</p>
+        <p>On the Opportunities page, clicking a stock reveals a <strong>radar chart</strong> with up to seven axes &mdash; one per indicator (Options appears as a 7th axis when data is available). Each axis shows the sub-score (0&ndash;100) for that indicator. A large, well-rounded shape means multiple indicators agree the stock is a good opportunity. A lopsided shape means only some indicators are favorable.</p>
 
         <p>Use the radar chart to understand <em>why</em> a stock has its score. For example:</p>
         <ul>

@@ -46,6 +46,10 @@ class IndicatorSnapshot(models.Model):
     # Composite score
     opportunity_score = models.IntegerField(default=50)
 
+    # Price target range
+    buy_target = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    sell_target = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
     def __str__(self):
         return f'{self.ticker.symbol} score={self.opportunity_score}'
 

@@ -100,6 +100,20 @@ class TechnicalIndicatorService:
             options_score_val
         )
 
+        # --- Price Target Range ---
+        max_pain = None
+        try:
+            opts = ticker.options_snapshot
+            if opts and opts.max_pain is not None:
+                max_pain = float(opts.max_pain)
+        except OptionsSnapshot.DoesNotExist:
+            pass
+
+        buy_target, sell_target = TechnicalIndicatorService._compute_price_targets(
+            last_close, bb_lower, bb_upper, sma_50_val, sma_200_val,
+            ticker.week_52_high, ticker.week_52_low, max_pain
+        )
+
         snapshot, _ = IndicatorSnapshot.objects.update_or_create(
             ticker=ticker,
             defaults={
@@ -121,6 +135,8 @@ class TechnicalIndicatorService:
                 'sentiment_score': _to_dec(sentiment_val, 3) if sentiment_val is not None else None,
                 'sentiment_signal': sentiment_signal,
                 'opportunity_score': score,
+                'buy_target': _to_dec(buy_target),
+                'sell_target': _to_dec(sell_target),
             }
         )
         return snapshot
@@ -200,6 +216,65 @@ class TechnicalIndicatorService:
         if sentiment <= -0.15:
             return 'sell'
         return 'hold'
+
+    # ---------- Price Targets ----------
+
+    @staticmethod
+    def _compute_price_targets(price, bb_lower, bb_upper, sma_50, sma_200,
+                               week_52_high, week_52_low, max_pain=None):
+        """Compute buy and sell price target ranges from available data.
+
+        Buy target (support zone): averaged from lower indicators.
+        Sell target (resistance zone): averaged from upper indicators.
+        Returns (buy_target, sell_target) as floats, or (None, None).
+        """
+        if price is None or pd.isna(price):
+            return None, None
+
+        price = float(price)
+        buy_components = []
+        sell_components = []
+
+        # Bollinger Bands
+        if bb_lower is not None and not pd.isna(bb_lower):
+            buy_components.append(float(bb_lower))
+        if bb_upper is not None and not pd.isna(bb_upper):
+            sell_components.append(float(bb_upper))
+
+        # SMA 200 as support, SMA 50 as resistance reference
+        if sma_200 is not None and not pd.isna(sma_200):
+            buy_components.append(float(sma_200))
+        if sma_50 is not None and not pd.isna(sma_50):
+            if float(sma_50) > price:
+                sell_components.append(float(sma_50))
+            else:
+                buy_components.append(float(sma_50))
+
+        # Options max pain as price gravity
+        if max_pain is not None:
+            if max_pain < price:
+                buy_components.append(max_pain)
+            else:
+                sell_components.append(max_pain)
+
+        # 52-week range (weighted toward current price: 70% range extreme, 30% current)
+        if week_52_low is not None:
+            adjusted_low = float(week_52_low) * 0.7 + price * 0.3
+            buy_components.append(adjusted_low)
+        if week_52_high is not None:
+            adjusted_high = float(week_52_high) * 0.7 + price * 0.3
+            sell_components.append(adjusted_high)
+
+        buy_target = round(sum(buy_components) / len(buy_components), 2) if buy_components else None
+        sell_target = round(sum(sell_components) / len(sell_components), 2) if sell_components else None
+
+        # Sanity: buy target should be below current price, sell above
+        if buy_target is not None and buy_target >= price:
+            buy_target = round(price * 0.95, 2)
+        if sell_target is not None and sell_target <= price:
+            sell_target = round(price * 1.05, 2)
+
+        return buy_target, sell_target
 
     # ---------- Composite Score ----------
 
@@ -346,6 +421,14 @@ class AIAnalysisService:
             ])
             if indicators.sentiment_score is not None:
                 lines.append(f"- News sentiment: {indicators.sentiment_score} ({indicators.sentiment_signal})")
+            if indicators.buy_target and indicators.sell_target:
+                lines.extend([
+                    "",
+                    "Price target range:",
+                    f"- Buy target (support): ${indicators.buy_target}",
+                    f"- Sell target (resistance): ${indicators.sell_target}",
+                    f"- Current price vs targets: {'near support' if ticker.last_price and float(ticker.last_price) <= float(indicators.buy_target) * 1.05 else 'near resistance' if ticker.last_price and float(ticker.last_price) >= float(indicators.sell_target) * 0.95 else 'mid-range'}",
+                ])
 
         # Options data
         try:
@@ -373,8 +456,10 @@ class AIAnalysisService:
 
         lines.extend([
             "",
-            "Provide a concise 2-4 sentence analysis covering the technical outlook "
-            "and key factors. Do not give financial advice. Do not use bullet points.",
+            "Provide a concise 2-4 sentence analysis covering the technical outlook, "
+            "options positioning, price target levels, and key factors. "
+            "Reference specific support/resistance levels when available. "
+            "Do not give financial advice. Do not use bullet points.",
         ])
         return "\n".join(lines)
 
