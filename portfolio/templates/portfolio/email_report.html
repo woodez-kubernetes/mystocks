@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portfolio Report</title>
+    <title>Weekly Report</title>
 </head>
 <body style="margin:0; padding:0; background-color:#0d1117; font-family:Arial,Helvetica,sans-serif; color:#e6edf3;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0d1117;">
@@ -14,7 +14,7 @@
             <tr><td style="padding:24px 30px; background-color:#1a1a2e; border-radius:8px 8px 0 0; border-bottom:2px solid #4fc3f7;">
                 <h1 style="margin:0; color:#4fc3f7; font-size:22px;">ApexKube Capital</h1>
                 <p style="margin:4px 0 0; color:#8b949e; font-size:13px;">
-                    Portfolio Report &mdash; {{ generated_at|date:"F d, Y" }} at {{ generated_at|date:"g:i A" }}
+                    Weekly Report &mdash; {{ generated_at|date:"F d, Y" }} at {{ generated_at|date:"g:i A" }}
                 </p>
             </td></tr>
 
@@ -56,146 +56,10 @@
                 </tr>
                 </table>
 
-                <!-- Charts Row -->
-                {% if pdata.allocation_chart_cid or pdata.gainloss_chart_cid %}
-                <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
-                <tr>
-                    {% if pdata.allocation_chart_cid %}
-                    <td width="{% if pdata.gainloss_chart_cid %}45%{% else %}100%{% endif %}" align="center" valign="top" style="padding:4px;">
-                        <img src="cid:{{ pdata.allocation_chart_cid }}" width="280" style="max-width:100%; border-radius:6px;">
-                    </td>
-                    {% endif %}
-                    {% if pdata.gainloss_chart_cid %}
-                    <td width="{% if pdata.allocation_chart_cid %}55%{% else %}100%{% endif %}" align="center" valign="top" style="padding:4px;">
-                        <img src="cid:{{ pdata.gainloss_chart_cid }}" width="340" style="max-width:100%; border-radius:6px;">
-                    </td>
-                    {% endif %}
-                </tr>
-                </table>
-                {% endif %}
-
-                <!-- Holdings Table -->
-                <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse; margin-bottom:16px;">
-                <thead>
-                <tr style="background:#1a1a2e;">
-                    <th style="text-align:left; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Ticker</th>
-                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Shares</th>
-                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Avg Cost</th>
-                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Price</th>
-                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Value</th>
-                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Gain/Loss</th>
-                    <th style="text-align:center; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Chart</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for hd in pdata.holdings_data %}
-                <tr style="border-bottom:1px solid #21262d;">
-                    <td style="padding:10px 8px; vertical-align:top;">
-                        <div style="color:#e6edf3; font-weight:bold; font-size:14px;">{{ hd.holding.ticker.symbol }}</div>
-                        <div style="color:#8b949e; font-size:11px;">{{ hd.holding.ticker.company_name|default:"" }}</div>
-                        {% if hd.holding.ticker.sector %}
-                        <div style="color:#6e7681; font-size:10px;">{{ hd.holding.ticker.sector }}</div>
-                        {% endif %}
-                    </td>
-                    <td style="text-align:right; color:#e6edf3; padding:10px 8px; vertical-align:top; font-size:13px;">
-                        {{ hd.holding.total_shares|floatformat:2 }}
-                    </td>
-                    <td style="text-align:right; color:#e6edf3; padding:10px 8px; vertical-align:top; font-size:13px;">
-                        ${{ hd.holding.avg_cost|floatformat:2 }}
-                    </td>
-                    <td style="text-align:right; padding:10px 8px; vertical-align:top;">
-                        <div style="color:#e6edf3; font-size:13px;">${{ hd.holding.ticker.last_price|floatformat:2|default:"--" }}</div>
-                        {% if hd.holding.ticker.day_change_pct is not None %}
-                        <div style="font-size:11px; color:{% if hd.holding.ticker.day_change_pct >= 0 %}#00c853{% else %}#ff1744{% endif %};">
-                            {% if hd.holding.ticker.day_change_pct >= 0 %}+{% endif %}{{ hd.holding.ticker.day_change_pct|floatformat:2 }}%
-                        </div>
-                        {% endif %}
-                    </td>
-                    <td style="text-align:right; color:#e6edf3; padding:10px 8px; vertical-align:top; font-size:13px;">
-                        {% if hd.holding.current_value %}${{ hd.holding.current_value|floatformat:2 }}{% else %}--{% endif %}
-                    </td>
-                    <td style="text-align:right; padding:10px 8px; vertical-align:top;">
-                        {% if hd.holding.gain_loss is not None %}
-                        <div style="font-size:13px; font-weight:bold; color:{% if hd.holding.gain_loss >= 0 %}#00c853{% else %}#ff1744{% endif %};">
-                            {% if hd.holding.gain_loss >= 0 %}+{% endif %}${{ hd.holding.gain_loss|floatformat:2 }}
-                        </div>
-                        <div style="font-size:11px; color:{% if hd.holding.gain_loss_pct >= 0 %}#00c853{% else %}#ff1744{% endif %};">
-                            ({% if hd.holding.gain_loss_pct >= 0 %}+{% endif %}{{ hd.holding.gain_loss_pct|floatformat:1 }}%)
-                        </div>
-                        {% else %}
-                        <div style="color:#8b949e;">--</div>
-                        {% endif %}
-                    </td>
-                    <td style="text-align:center; padding:10px 4px; vertical-align:top;">
-                        {% if hd.sparkline_cid %}
-                        <img src="cid:{{ hd.sparkline_cid }}" width="120" height="40" style="border-radius:4px;">
-                        {% endif %}
-                    </td>
-                </tr>
-
-                <!-- Technical Indicators -->
-                {% if hd.indicators %}
-                <tr style="border-bottom:1px solid #21262d;">
-                    <td colspan="7" style="padding:6px 12px; background:#0d1117;">
-                        <table cellpadding="0" cellspacing="0" style="width:100%;">
-                        <tr>
-                            <td style="font-size:11px; color:#8b949e; padding-right:8px; white-space:nowrap;">Signals:</td>
-                            <td>
-                                {% for label, signal in hd.indicators.signal_summary %}
-                                <span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; margin:1px 2px;
-                                    background:{% if signal == 'buy' %}#00c85322{% elif signal == 'sell' %}#ff174422{% else %}#ffd74022{% endif %};
-                                    color:{% if signal == 'buy' %}#00c853{% elif signal == 'sell' %}#ff1744{% else %}#ffd740{% endif %};">
-                                    {{ label }}: {{ signal|upper }}
-                                </span>
-                                {% endfor %}
-                            </td>
-                            <td style="text-align:right; white-space:nowrap;">
-                                <span style="font-size:11px; color:#4fc3f7; font-weight:bold;">
-                                    Score: {{ hd.indicators.opportunity_score }}/100
-                                </span>
-                            </td>
-                        </tr>
-                        </table>
-                    </td>
-                </tr>
-                {% endif %}
-
-                <!-- AI Analysis -->
-                {% if hd.ai_analysis %}
-                <tr style="border-bottom:1px solid #21262d;">
-                    <td colspan="7" style="padding:8px 12px; background:#0d1117;">
-                        <div style="font-size:10px; color:#8b949e; margin-bottom:2px;">Kevin's Take:</div>
-                        <div style="font-size:12px; color:#c9d1d9; font-style:italic; line-height:1.4;">
-                            {{ hd.ai_analysis.analysis_text }}
-                        </div>
-                    </td>
-                </tr>
-                {% endif %}
-
-                <!-- Recent News -->
-                {% if hd.news %}
-                <tr style="border-bottom:2px solid #30363d;">
-                    <td colspan="7" style="padding:8px 12px; background:#0d1117;">
-                        <div style="font-size:10px; color:#8b949e; margin-bottom:4px;">Recent News:</div>
-                        {% for article in hd.news %}
-                        <div style="font-size:11px; margin-bottom:3px; line-height:1.3;">
-                            <span style="color:{% if article.sentiment_label == 'positive' %}#00c853{% elif article.sentiment_label == 'negative' %}#ff1744{% else %}#8b949e{% endif %};">&#9679;</span>
-                            <a href="{{ article.url }}" style="color:#4fc3f7; text-decoration:none;">{{ article.title|truncatewords:12 }}</a>
-                            {% if article.source %}<span style="color:#6e7681;"> &mdash; {{ article.source }}</span>{% endif %}
-                        </div>
-                        {% endfor %}
-                    </td>
-                </tr>
-                {% endif %}
-
-                {% endfor %}
-                </tbody>
-                </table>
-
-                <!-- Opportunity Scores Chart -->
-                {% if pdata.opportunity_chart_cid %}
-                <div style="text-align:center; margin:16px 0 0;">
-                    <img src="cid:{{ pdata.opportunity_chart_cid }}" width="400" style="max-width:100%; border-radius:6px;">
+                <!-- Allocation Chart -->
+                {% if pdata.allocation_chart_cid %}
+                <div style="text-align:center; margin-bottom:20px;">
+                    <img src="cid:{{ pdata.allocation_chart_cid }}" width="300" style="max-width:100%; border-radius:6px;">
                 </div>
                 {% endif %}
 
@@ -208,6 +72,102 @@
             {% endif %}
 
             {% endfor %}
+
+            <!-- Top 5 Best Buys -->
+            {% if top_picks %}
+            <tr><td style="padding:0 30px;">
+                <hr style="border:none; border-top:2px solid #4fc3f7; margin:0;">
+            </td></tr>
+            <tr><td style="padding:24px 30px;">
+                <h2 style="margin:0 0 16px; color:#4fc3f7; font-size:18px; border-bottom:1px solid #30363d; padding-bottom:8px;">
+                    Top 5 Best Buys This Week
+                </h2>
+
+                <!-- Top Picks Chart -->
+                {% if top_picks_chart_cid %}
+                <div style="text-align:center; margin-bottom:20px;">
+                    <img src="cid:{{ top_picks_chart_cid }}" width="400" style="max-width:100%; border-radius:6px;">
+                </div>
+                {% endif %}
+
+                <!-- Top Picks Table -->
+                <table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse; margin-bottom:16px;">
+                <thead>
+                <tr style="background:#1a1a2e;">
+                    <th style="text-align:center; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px; width:40px;">#</th>
+                    <th style="text-align:left; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Ticker</th>
+                    <th style="text-align:right; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Price</th>
+                    <th style="text-align:center; color:#8b949e; font-size:11px; border-bottom:2px solid #30363d; padding:10px 8px;">Score</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for pick in top_picks %}
+                <tr style="border-bottom:1px solid #21262d;">
+                    <td style="text-align:center; color:#4fc3f7; font-size:16px; font-weight:bold; padding:12px 8px; vertical-align:top;">
+                        {{ forloop.counter }}
+                    </td>
+                    <td style="padding:12px 8px; vertical-align:top;">
+                        <div style="color:#e6edf3; font-weight:bold; font-size:14px;">{{ pick.ticker.symbol }}</div>
+                        <div style="color:#8b949e; font-size:11px;">{{ pick.ticker.company_name|default:"" }}</div>
+                        {% if pick.ticker.sector %}
+                        <div style="color:#6e7681; font-size:10px;">{{ pick.ticker.sector }}</div>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:right; padding:12px 8px; vertical-align:top;">
+                        <div style="color:#e6edf3; font-size:13px;">${{ pick.ticker.last_price|floatformat:2|default:"--" }}</div>
+                        {% if pick.ticker.day_change_pct is not None %}
+                        <div style="font-size:11px; color:{% if pick.ticker.day_change_pct >= 0 %}#00c853{% else %}#ff1744{% endif %};">
+                            {% if pick.ticker.day_change_pct >= 0 %}+{% endif %}{{ pick.ticker.day_change_pct|floatformat:2 }}%
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center; padding:12px 8px; vertical-align:top;">
+                        <div style="display:inline-block; padding:4px 12px; border-radius:12px; font-size:14px; font-weight:bold;
+                            background:{% if pick.indicators.opportunity_score >= 70 %}#00c85322{% elif pick.indicators.opportunity_score >= 40 %}#ffd74022{% else %}#ff174422{% endif %};
+                            color:{% if pick.indicators.opportunity_score >= 70 %}#00c853{% elif pick.indicators.opportunity_score >= 40 %}#ffd740{% else %}#ff1744{% endif %};">
+                            {{ pick.indicators.opportunity_score }}
+                        </div>
+                    </td>
+                </tr>
+
+                <!-- Signals Row -->
+                <tr style="border-bottom:1px solid #21262d;">
+                    <td colspan="4" style="padding:6px 12px; background:#0d1117;">
+                        <table cellpadding="0" cellspacing="0" style="width:100%;">
+                        <tr>
+                            <td style="font-size:11px; color:#8b949e; padding-right:8px; white-space:nowrap;">Signals:</td>
+                            <td>
+                                {% for label, signal in pick.indicators.signal_summary %}
+                                <span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; margin:1px 2px;
+                                    background:{% if signal == 'buy' %}#00c85322{% elif signal == 'sell' %}#ff174422{% else %}#ffd74022{% endif %};
+                                    color:{% if signal == 'buy' %}#00c853{% elif signal == 'sell' %}#ff1744{% else %}#ffd740{% endif %};">
+                                    {{ label }}: {{ signal|upper }}
+                                </span>
+                                {% endfor %}
+                            </td>
+                        </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- AI Analysis -->
+                {% if pick.ai_analysis %}
+                <tr style="border-bottom:2px solid #30363d;">
+                    <td colspan="4" style="padding:8px 12px; background:#0d1117;">
+                        <div style="font-size:10px; color:#8b949e; margin-bottom:2px;">Kevin's Take:</div>
+                        <div style="font-size:12px; color:#c9d1d9; font-style:italic; line-height:1.4;">
+                            {{ pick.ai_analysis.analysis_text }}
+                        </div>
+                    </td>
+                </tr>
+                {% endif %}
+
+                {% endfor %}
+                </tbody>
+                </table>
+
+            </td></tr>
+            {% endif %}
 
             <!-- Footer -->
             <tr><td style="padding:20px 30px; background:#0d1117; border-radius:0 0 8px 8px; text-align:center; border-top:1px solid #30363d;">

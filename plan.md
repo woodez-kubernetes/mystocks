@@ -145,6 +145,33 @@ A Django-based stock portfolio analysis application that lets users manage stock
 
 ---
 
+## Stage 6.9: Streamlined Weekly Report
+**Goal:** Redesign the email report to focus on overall portfolio performance and surface the top 5 best buying opportunities for the week.
+
+### Current State
+The report currently shows per-holding details (shares, avg cost, price, value, gain/loss, sparkline, technical signals, AI analysis, recent news) for every ticker in every portfolio — too much detail for a quick weekly read.
+
+### Tasks
+- [ ] **Simplify `gather_report_data()`** — collect only portfolio-level summaries (total cost, market value, gain/loss, gain/loss %) instead of per-holding breakdowns
+- [ ] **Add top-5 best-buys selection** — across all portfolio + watchlist tickers, rank by opportunity score and select the top 5; for each, include:
+  - Ticker symbol & company name
+  - Current price & day change %
+  - Opportunity score (0-100)
+  - Signal summary (buy/hold/sell from RSI, MACD, BB, SMA, Volume, Sentiment, Options)
+  - One-line AI analysis summary (Kevin's Take)
+- [ ] **Update `ReportChartService`** — remove per-holding sparklines and gain/loss bar chart; keep portfolio allocation pie chart; replace opportunity score chart with a top-5-only version
+- [ ] **Redesign `email_report.html`** — two-section layout:
+  1. **Portfolio Performance** — summary cards (total cost, market value, gain/loss with %) and allocation pie chart per portfolio
+  2. **Top 5 Best Buys This Week** — ranked table with score, signals, price, and AI take for the 5 highest-scoring tickers
+- [ ] **Remove per-holding sections** — drop the detailed holdings table, per-ticker sparklines, per-ticker news, and per-ticker AI analysis rows from the email template
+- [ ] **Update `generate_and_send()`** — adjust chart generation and image attachment logic for the new streamlined data
+- [ ] **Update email subject** — change to "Weekly Report" style (e.g., "ApexKube Capital — Week of March 25, 2026")
+- [ ] **Update tests** — adjust existing report tests for the new data structure and template; add test for top-5 selection logic
+
+**Deliverables:** A concise weekly email showing portfolio health at a glance plus the 5 most compelling buy opportunities.
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Goal:** Final UI polish, performance optimization, and deployment readiness.
 
