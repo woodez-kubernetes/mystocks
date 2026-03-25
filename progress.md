@@ -1,6 +1,6 @@
 # MyStocks - Build Progress
 
-## Overall Status: Stage 6.8 - Complete ✅
+## Overall Status: Stage 6.9 - Complete ✅
 
 ---
 
@@ -170,6 +170,22 @@
 
 ---
 
+## Stage 6.9: Streamlined Weekly Report
+**Status:** ✅ Complete
+
+- [x] Simplified `gather_report_data()` — portfolio-level summaries only, removed per-holding breakdowns
+- [x] Added `get_top_picks()` — selects top 5 tickers by opportunity score across portfolios + watchlist
+- [x] Each pick includes ticker info, price, opportunity score, signal summary, and AI analysis
+- [x] Updated `ReportChartService` — removed gain/loss bar chart and sparklines, added `generate_top_picks_chart()`
+- [x] Redesigned `email_report.html` — two-section layout: portfolio performance + top 5 best buys
+- [x] Removed per-holding detail rows (sparklines, per-ticker news, per-ticker AI analysis)
+- [x] Updated email subject to weekly branding ("ApexKube Capital — Weekly Report")
+- [x] Refresh now includes watchlist tickers alongside portfolio tickers
+- [x] Updated tests — 7 new tests (top picks selection, limits, watchlist inclusion, chart generation)
+- [x] 237 tests, all passing
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Status:** ⬜ Not Started
 
@@ -201,3 +217,4 @@
 | 2026-02-22 | 6.6 | Branding, auth & LLM: Renamed to ApexKube Capital, login required, Ollama AI analysis, 148 tests passing |
 | 2026-02-22 | 6.7 | Email reports & scheduling: HTML email with charts, audit log, report schedules on Settings page, cron command, 178 tests passing |
 | 2026-02-23 | 6.8 | PostgreSQL migration, Dockerfile with gunicorn, env-var config, 178 tests passing on PostgreSQL |
+| 2026-03-25 | 6.9 | Streamlined weekly report: portfolio performance summary + top 5 best buys, removed per-holding detail, 237 tests passing |

@@ -474,9 +474,63 @@ class EmailReportServiceTest(TestCase):
         self.assertEqual(len(data['portfolios']), 1)
         pdata = data['portfolios'][0]
         self.assertEqual(pdata['portfolio'].name, 'Test Portfolio')
-        self.assertEqual(len(pdata['holdings_data']), 1)
-        self.assertEqual(pdata['holdings_data'][0]['holding']['ticker'].symbol, 'AAPL')
+        self.assertEqual(len(pdata['holdings']), 1)
+        self.assertEqual(pdata['holdings'][0]['ticker'].symbol, 'AAPL')
         self.assertIn('generated_at', data)
+        self.assertIn('top_picks', data)
+
+    def test_gather_report_data_no_holdings_data(self):
+        """Report data should not contain per-holding detail breakdowns."""
+        from portfolio.report_service import EmailReportService
+        data = EmailReportService.gather_report_data()
+        pdata = data['portfolios'][0]
+        self.assertNotIn('holdings_data', pdata)
+
+    def test_get_top_picks(self):
+        from portfolio.report_service import EmailReportService
+        from analysis.models import IndicatorSnapshot
+        IndicatorSnapshot.objects.create(
+            ticker=self.ticker, opportunity_score=85,
+        )
+        picks = EmailReportService.get_top_picks()
+        self.assertEqual(len(picks), 1)
+        self.assertEqual(picks[0]['ticker'].symbol, 'AAPL')
+        self.assertEqual(picks[0]['indicators'].opportunity_score, 85)
+
+    def test_get_top_picks_limits_to_5(self):
+        from portfolio.report_service import EmailReportService
+        from analysis.models import IndicatorSnapshot
+        for i in range(7):
+            t = Ticker.objects.create(
+                symbol=f'T{i}', last_price=Decimal('100.00'),
+            )
+            Lot.objects.create(
+                portfolio=self.portfolio, ticker=t,
+                shares=Decimal('10'), cost_basis=Decimal('90.00'),
+                purchase_date=date(2024, 1, 1),
+            )
+            IndicatorSnapshot.objects.create(
+                ticker=t, opportunity_score=50 + i * 5,
+            )
+        picks = EmailReportService.get_top_picks()
+        self.assertEqual(len(picks), 5)
+        # Should be sorted descending by score
+        scores = [p['indicators'].opportunity_score for p in picks]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_get_top_picks_includes_watchlist(self):
+        from portfolio.report_service import EmailReportService
+        from analysis.models import IndicatorSnapshot
+        watch_ticker = Ticker.objects.create(
+            symbol='WATCH', last_price=Decimal('50.00'),
+        )
+        WatchlistItem.objects.create(ticker=watch_ticker)
+        IndicatorSnapshot.objects.create(
+            ticker=watch_ticker, opportunity_score=95,
+        )
+        picks = EmailReportService.get_top_picks()
+        symbols = [p['ticker'].symbol for p in picks]
+        self.assertIn('WATCH', symbols)
 
     def test_generate_allocation_chart(self):
         from portfolio.report_service import ReportChartService
@@ -485,30 +539,26 @@ class EmailReportServiceTest(TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result[:4] == b'\x89PNG')
 
-    def test_generate_gain_loss_chart(self):
-        from portfolio.report_service import ReportChartService
-        holdings = self.portfolio.get_holdings()
-        result = ReportChartService.generate_gain_loss_bar_chart(holdings)
-        self.assertIsNotNone(result)
-        self.assertTrue(result[:4] == b'\x89PNG')
-
     def test_generate_allocation_chart_empty(self):
         from portfolio.report_service import ReportChartService
         result = ReportChartService.generate_portfolio_allocation_chart([])
         self.assertIsNone(result)
 
-    def test_generate_opportunity_score_chart(self):
+    def test_generate_top_picks_chart(self):
         from portfolio.report_service import ReportChartService
         from analysis.models import IndicatorSnapshot
         snap = IndicatorSnapshot.objects.create(
             ticker=self.ticker, opportunity_score=75,
         )
-        holdings = self.portfolio.get_holdings()
-        result = ReportChartService.generate_opportunity_score_chart(
-            [(holdings[0], snap)]
-        )
+        top_picks = [{'ticker': self.ticker, 'indicators': snap, 'ai_analysis': None}]
+        result = ReportChartService.generate_top_picks_chart(top_picks)
         self.assertIsNotNone(result)
         self.assertTrue(result[:4] == b'\x89PNG')
+
+    def test_generate_top_picks_chart_empty(self):
+        from portfolio.report_service import ReportChartService
+        result = ReportChartService.generate_top_picks_chart([])
+        self.assertIsNone(result)
 
     @patch('portfolio.report_service.EmailReportService.refresh_portfolio_data')
     @patch('portfolio.report_service.EmailMessage')
