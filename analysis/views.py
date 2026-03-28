@@ -9,7 +9,19 @@ from portfolio.models import Ticker, WatchlistItem
 
 def opportunities_view(request):
     """Buying opportunities dashboard ranked by opportunity score."""
-    snapshots = IndicatorSnapshot.objects.select_related('ticker').all()
+    # Only show tickers in user's portfolios or watchlist
+    user_ticker_ids = set(
+        Ticker.objects.filter(
+            lots__portfolio__user=request.user
+        ).values_list('pk', flat=True)
+    )
+    user_ticker_ids.update(
+        request.user.watchlist_items.values_list('ticker_id', flat=True)
+    )
+
+    snapshots = IndicatorSnapshot.objects.select_related('ticker').filter(
+        ticker_id__in=user_ticker_ids
+    )
 
     # Filters
     signal_filter = request.GET.get('signal', '')
@@ -51,15 +63,15 @@ def opportunities_view(request):
 
     # Sectors for filter dropdown
     sectors = (
-        Ticker.objects.exclude(sector='')
+        Ticker.objects.filter(pk__in=user_ticker_ids)
+        .exclude(sector='')
         .values_list('sector', flat=True)
         .distinct()
         .order_by('sector')
     )
 
     # Portfolios for quick-add
-    from portfolio.models import Portfolio
-    portfolios = Portfolio.objects.all()
+    portfolios = request.user.portfolios.all()
 
     context = {
         'snapshots': snapshots,
@@ -163,7 +175,7 @@ def ticker_radar_data(request, symbol):
 
 def watchlist_view(request):
     """Watchlist page showing tracked tickers."""
-    items = WatchlistItem.objects.select_related('ticker').all()
+    items = request.user.watchlist_items.select_related('ticker').all()
     # Attach indicators
     for item in items:
         try:
@@ -186,8 +198,8 @@ def watchlist_add(request):
     # Get or create the ticker
     ticker, created = Ticker.objects.get_or_create(symbol=symbol)
 
-    # Check if already on watchlist
-    if WatchlistItem.objects.filter(ticker=ticker).exists():
+    # Check if already on user's watchlist
+    if request.user.watchlist_items.filter(ticker=ticker).exists():
         if request.headers.get('HX-Request'):
             from django.contrib import messages
             messages.info(request, f'{symbol} is already on your watchlist.')
@@ -198,7 +210,7 @@ def watchlist_add(request):
         return JsonResponse({'error': 'Already on watchlist'}, status=400)
 
     notes = request.POST.get('notes', '')
-    WatchlistItem.objects.create(ticker=ticker, notes=notes)
+    WatchlistItem.objects.create(user=request.user, ticker=ticker, notes=notes)
 
     if request.headers.get('HX-Request'):
         from django.contrib import messages
@@ -216,7 +228,7 @@ def watchlist_remove(request, pk):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=405)
 
-    item = get_object_or_404(WatchlistItem, pk=pk)
+    item = get_object_or_404(WatchlistItem, pk=pk, user=request.user)
     symbol = item.ticker.symbol
     item.delete()
 

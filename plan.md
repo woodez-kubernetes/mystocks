@@ -190,6 +190,55 @@ The report currently shows per-holding details (shares, avg cost, price, value, 
 
 ---
 
+## Stage 6.11: Multi-User Support & Registration
+**Goal:** Make the app fully multi-tenant so each user sees only their own portfolios, watchlist, and report schedules. Add self-service account creation.
+
+### Design Decisions
+- **Tickers** remain global — shared market data, indicators, options snapshots, AI analysis, and news. No user FK needed.
+- **Portfolios, WatchlistItems, ReportSchedules** become per-user via a `user` FK to `auth.User`.
+- **Data migration** assigns all existing records to the first superuser account.
+- **Admin** (Django superuser) can see all users' data via `/admin/`.
+
+### Tasks
+
+#### 6.11a: Model Changes & Data Migration
+- [ ] **Add `user` FK to `Portfolio`** — `models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='portfolios')`
+- [ ] **Add `user` FK to `WatchlistItem`** — same pattern, `related_name='watchlist_items'`; drop the `OneToOneField` on ticker (a ticker can now be on multiple users' watchlists) and replace with `ForeignKey` + `unique_together = ('user', 'ticker')`
+- [ ] **Add `user` FK to `ReportSchedule`** — same pattern, `related_name='report_schedules'`
+- [ ] **Data migration** — assign all existing Portfolio, WatchlistItem, and ReportSchedule rows to the first superuser (`User.objects.filter(is_superuser=True).first()`)
+
+#### 6.11b: User Registration
+- [ ] **Registration view** — simple form with username + password + password confirmation using Django's `UserCreationForm`
+- [ ] **Registration template** — styled to match existing login page (dark theme, ApexKube branding)
+- [ ] **Registration URL** — `accounts/register/` with a link from the login page ("Don't have an account? Sign up")
+- [ ] **Auto-login after registration** — log the user in immediately after successful signup and redirect to dashboard
+
+#### 6.11c: Query Scoping (Views)
+- [ ] **Scope all Portfolio queries** — filter by `user=request.user` in: `dashboard`, `portfolio_list`, `portfolio_detail`, `portfolio_create` (set user on save), `portfolio_edit`, `portfolio_delete`, `portfolio_export_csv`, `portfolio_growth_data`
+- [ ] **Scope WatchlistItem queries** — filter by `user=request.user` in all watchlist views; set user on create
+- [ ] **Scope ReportSchedule queries** — filter by `user=request.user` in schedule CRUD views and `_render_schedule_list`
+- [ ] **Scope report generation** — `EmailReportService` methods need to accept a user and filter portfolios/watchlist by that user
+- [ ] **Scope opportunities/comparison** — filter tickers shown to those in the user's portfolios + watchlist
+- [ ] **Ownership checks** — return 404 (not 403) if a user tries to access another user's portfolio/lot/schedule by PK, using `get_object_or_404(Portfolio, pk=pk, user=request.user)`
+
+#### 6.11d: Report & Refresh Scoping
+- [ ] **Update `refresh_portfolio_data()`** — accept a user parameter; only refresh tickers in that user's portfolios + watchlist
+- [ ] **Update `gather_report_data()`** — accept a user parameter; only include that user's portfolios
+- [ ] **Update `get_top_picks()`** — accept a user parameter; only consider that user's tickers
+- [ ] **Update `check_report_schedules` command** — iterate all users' schedules and send per-user reports
+- [ ] **Update `refresh_all` view** — only refresh tickers belonging to `request.user`'s portfolios + watchlist
+
+#### 6.11e: Tests
+- [ ] **Registration tests** — GET renders form, POST creates user and logs in, duplicate username rejected
+- [ ] **Isolation tests** — user A cannot see user B's portfolios, watchlist items, or schedules (verify 404)
+- [ ] **Scoping tests** — dashboard/list views only show current user's data
+- [ ] **Migration test** — verify existing data is assigned to the first superuser
+- [ ] **Update existing tests** — add `user=self.user` when creating Portfolio, WatchlistItem, ReportSchedule in setUp
+
+**Deliverables:** Fully multi-tenant app with user registration, per-user data isolation, and backward-compatible data migration.
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Goal:** Final UI polish, performance optimization, and deployment readiness.
 

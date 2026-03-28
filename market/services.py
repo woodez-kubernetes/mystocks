@@ -223,10 +223,10 @@ class StockDataService:
 
     @staticmethod
     def refresh_all(sleep_between=1.0):
-        """Refresh all tickers that are in at least one portfolio or on the watchlist."""
+        """Refresh all tickers that are in at least one portfolio or on a watchlist."""
         from django.db.models import Q
         tickers = Ticker.objects.filter(
-            Q(lots__isnull=False) | Q(watchlist_entry__isnull=False)
+            Q(lots__isnull=False) | Q(watchlist_entries__isnull=False)
         ).distinct()
         results = []
         for ticker in tickers:

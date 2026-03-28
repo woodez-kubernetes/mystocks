@@ -197,7 +197,7 @@ class TickerDetailViewTest(LoggedInTestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_shows_holdings(self):
-        portfolio = Portfolio.objects.create(name='Test')
+        portfolio = Portfolio.objects.create(name='Test', user=self.user)
         Lot.objects.create(
             portfolio=portfolio, ticker=self.ticker,
             shares=Decimal('100'), cost_basis=Decimal('150'),
@@ -417,7 +417,7 @@ class NewsPageViewTest(LoggedInTestCase):
 
     def test_news_page_shows_articles(self):
         ticker = Ticker.objects.create(symbol='AAPL')
-        portfolio = Portfolio.objects.create(name='Test')
+        portfolio = Portfolio.objects.create(name='Test', user=self.user)
         Lot.objects.create(
             portfolio=portfolio, ticker=ticker,
             shares=Decimal('10'), cost_basis=Decimal('150'),

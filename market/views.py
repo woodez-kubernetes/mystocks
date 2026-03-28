@@ -13,8 +13,10 @@ def ticker_detail(request, symbol):
     symbol = symbol.upper()
     ticker = get_object_or_404(Ticker, symbol=symbol)
 
-    # Get holdings across all portfolios
-    lots = Lot.objects.filter(ticker=ticker).select_related('portfolio')
+    # Get holdings for current user's portfolios
+    lots = Lot.objects.filter(
+        ticker=ticker, portfolio__user=request.user
+    ).select_related('portfolio')
     total_shares = sum(lot.shares for lot in lots)
 
     # Recent price history for initial chart (3 months)
@@ -117,9 +119,8 @@ def chart_data(request, symbol):
 def settings_view(request):
     """Settings page with RSS feed management and report schedules."""
     from portfolio.forms import ReportScheduleForm
-    from portfolio.models import ReportSchedule
     feeds = RSSFeedSource.objects.all()
-    schedules = ReportSchedule.objects.all()
+    schedules = request.user.report_schedules.all()
     return render(request, 'market/settings.html', {
         'feeds': feeds,
         'schedules': schedules,

@@ -11,12 +11,14 @@ from .models import Lot, Portfolio, ReportAuditLog, ReportSchedule, Ticker
 
 
 def dashboard(request):
-    portfolios = Portfolio.objects.prefetch_related('lots__ticker').all()
+    portfolios = request.user.portfolios.prefetch_related('lots__ticker').all()
     context = {
         'portfolios': portfolios,
         'portfolio_count': portfolios.count(),
-        'ticker_count': Ticker.objects.filter(lots__isnull=False).distinct().count(),
-        'lot_count': Lot.objects.count(),
+        'ticker_count': Ticker.objects.filter(
+            lots__portfolio__user=request.user
+        ).distinct().count(),
+        'lot_count': Lot.objects.filter(portfolio__user=request.user).count(),
     }
     return render(request, 'portfolio/dashboard.html', context)
 
@@ -28,12 +30,12 @@ def metrics_info(request):
 # --- Portfolio CRUD ---
 
 def portfolio_list(request):
-    portfolios = Portfolio.objects.prefetch_related('lots__ticker').all()
+    portfolios = request.user.portfolios.prefetch_related('lots__ticker').all()
     return render(request, 'portfolio/portfolio_list.html', {'portfolios': portfolios})
 
 
 def portfolio_detail(request, pk):
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
     holdings = portfolio.get_holdings()
 
     # Portfolio AI analysis (if previously generated)
@@ -54,7 +56,9 @@ def portfolio_create(request):
     if request.method == 'POST':
         form = PortfolioForm(request.POST)
         if form.is_valid():
-            portfolio = form.save()
+            portfolio = form.save(commit=False)
+            portfolio.user = request.user
+            portfolio.save()
             if request.headers.get('HX-Request'):
                 return render(
                     request,
@@ -74,7 +78,7 @@ def portfolio_create(request):
 
 
 def portfolio_edit(request, pk):
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
     if request.method == 'POST':
         form = PortfolioForm(request.POST, instance=portfolio)
         if form.is_valid():
@@ -100,7 +104,7 @@ def portfolio_edit(request, pk):
 
 
 def portfolio_delete(request, pk):
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
     if request.method == 'POST':
         name = portfolio.name
         portfolio.delete()
@@ -123,7 +127,7 @@ def portfolio_delete(request, pk):
 # --- Lot CRUD ---
 
 def lot_create(request, portfolio_pk):
-    portfolio = get_object_or_404(Portfolio, pk=portfolio_pk)
+    portfolio = get_object_or_404(Portfolio, pk=portfolio_pk, user=request.user)
     if request.method == 'POST':
         form = LotForm(request.POST, portfolio=portfolio)
         if form.is_valid():
@@ -149,7 +153,10 @@ def lot_create(request, portfolio_pk):
 
 
 def lot_edit(request, pk):
-    lot = get_object_or_404(Lot.objects.select_related('portfolio', 'ticker'), pk=pk)
+    lot = get_object_or_404(
+        Lot.objects.select_related('portfolio', 'ticker'),
+        pk=pk, portfolio__user=request.user,
+    )
     portfolio = lot.portfolio
     if request.method == 'POST':
         form = LotForm(request.POST, instance=lot, portfolio=portfolio)
@@ -177,7 +184,10 @@ def lot_edit(request, pk):
 
 
 def lot_delete(request, pk):
-    lot = get_object_or_404(Lot.objects.select_related('portfolio'), pk=pk)
+    lot = get_object_or_404(
+        Lot.objects.select_related('portfolio'),
+        pk=pk, portfolio__user=request.user,
+    )
     portfolio = lot.portfolio
     if request.method == 'POST':
         lot.delete()
@@ -203,7 +213,7 @@ def lot_delete(request, pk):
 
 def portfolio_export_csv(request, pk):
     """Download portfolio holdings as a CSV file."""
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
     holdings = portfolio.get_holdings()
 
     safe_name = portfolio.name.replace(' ', '_').replace('"', '')
@@ -267,7 +277,7 @@ def portfolio_export_csv(request, pk):
 @require_POST
 def generate_portfolio_analysis(request, pk):
     """HTMX endpoint: generate portfolio-level AI analysis on demand."""
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
 
     from analysis.services import PortfolioAnalysisService
     portfolio_analysis = PortfolioAnalysisService.generate_analysis(portfolio, force=True)
@@ -284,7 +294,7 @@ def portfolio_growth_data(request, pk):
     """JSON API: 52-week portfolio growth vs major indices (% return)."""
     import yfinance as yf
 
-    portfolio = get_object_or_404(Portfolio, pk=pk)
+    portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
     holdings = portfolio.get_holdings()
 
     if not holdings:
@@ -376,7 +386,7 @@ def ticker_search(request):
 # --- Report Schedules ---
 
 def _render_schedule_list(request):
-    schedules = ReportSchedule.objects.all()
+    schedules = request.user.report_schedules.all()
     return render(request, 'portfolio/partials/schedule_list.html', {
         'schedules': schedules,
         'form': ReportScheduleForm(),
@@ -387,12 +397,14 @@ def _render_schedule_list(request):
 def schedule_create(request):
     form = ReportScheduleForm(request.POST)
     if form.is_valid():
-        form.save()
+        schedule = form.save(commit=False)
+        schedule.user = request.user
+        schedule.save()
         if request.headers.get('HX-Request'):
             return _render_schedule_list(request)
         return redirect('settings')
     if request.headers.get('HX-Request'):
-        schedules = ReportSchedule.objects.all()
+        schedules = request.user.report_schedules.all()
         return render(request, 'portfolio/partials/schedule_list.html', {
             'schedules': schedules,
             'form': form,
@@ -402,7 +414,7 @@ def schedule_create(request):
 
 @require_POST
 def schedule_edit(request, pk):
-    schedule = get_object_or_404(ReportSchedule, pk=pk)
+    schedule = get_object_or_404(ReportSchedule, pk=pk, user=request.user)
     form = ReportScheduleForm(request.POST, instance=schedule)
     if form.is_valid():
         form.save()
@@ -413,7 +425,7 @@ def schedule_edit(request, pk):
 
 @require_POST
 def schedule_delete(request, pk):
-    schedule = get_object_or_404(ReportSchedule, pk=pk)
+    schedule = get_object_or_404(ReportSchedule, pk=pk, user=request.user)
     schedule.delete()
     if request.headers.get('HX-Request'):
         return _render_schedule_list(request)
@@ -422,7 +434,7 @@ def schedule_delete(request, pk):
 
 @require_POST
 def schedule_toggle(request, pk):
-    schedule = get_object_or_404(ReportSchedule, pk=pk)
+    schedule = get_object_or_404(ReportSchedule, pk=pk, user=request.user)
     schedule.enabled = not schedule.enabled
     schedule.save(update_fields=['enabled'])
     if request.headers.get('HX-Request'):
@@ -445,7 +457,7 @@ def send_email_report(request):
     from portfolio.report_service import EmailReportService
 
     try:
-        EmailReportService.generate_and_send()
+        EmailReportService.generate_and_send(user=request.user)
         if request.headers.get('HX-Request'):
             return HttpResponse(
                 '<div class="alert alert-success alert-dismissible fade show" role="alert">'

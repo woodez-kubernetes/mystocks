@@ -261,6 +261,12 @@ class OpportunitiesViewTest(LoggedInTestCase):
                                           rsi_signal='sell', macd_signal='sell',
                                           bb_signal='hold', sma_signal='sell',
                                           volume_signal='hold', sentiment_signal='hold')
+        # Link tickers to user via portfolio so they appear in opportunities
+        portfolio = Portfolio.objects.create(name='Test', user=self.user)
+        Lot.objects.create(portfolio=portfolio, ticker=self.t1, shares=Decimal('1'),
+                           cost_basis=Decimal('100'), purchase_date=date(2024, 1, 1))
+        Lot.objects.create(portfolio=portfolio, ticker=self.t2, shares=Decimal('1'),
+                           cost_basis=Decimal('50'), purchase_date=date(2024, 1, 1))
 
     def test_page_loads(self):
         response = self.client.get(reverse('opportunities'))
@@ -350,14 +356,14 @@ class WatchlistViewTest(LoggedInTestCase):
     def test_add_duplicate(self):
         ticker = Ticker.objects.create(symbol='AAPL')
         from portfolio.models import WatchlistItem
-        WatchlistItem.objects.create(ticker=ticker)
+        WatchlistItem.objects.create(ticker=ticker, user=self.user)
         response = self.client.post(reverse('watchlist_add'), {'symbol': 'AAPL'})
         self.assertEqual(response.status_code, 400)
 
     def test_remove_from_watchlist(self):
         ticker = Ticker.objects.create(symbol='AAPL')
         from portfolio.models import WatchlistItem
-        item = WatchlistItem.objects.create(ticker=ticker)
+        item = WatchlistItem.objects.create(ticker=ticker, user=self.user)
         response = self.client.post(reverse('watchlist_remove', args=[item.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(WatchlistItem.objects.count(), 0)
@@ -365,7 +371,7 @@ class WatchlistViewTest(LoggedInTestCase):
     def test_remove_requires_post(self):
         ticker = Ticker.objects.create(symbol='AAPL')
         from portfolio.models import WatchlistItem
-        item = WatchlistItem.objects.create(ticker=ticker)
+        item = WatchlistItem.objects.create(ticker=ticker, user=self.user)
         response = self.client.get(reverse('watchlist_remove', args=[item.pk]))
         self.assertEqual(response.status_code, 405)
 
@@ -373,7 +379,7 @@ class WatchlistViewTest(LoggedInTestCase):
         ticker = Ticker.objects.create(symbol='AAPL', company_name='Apple Inc.',
                                         last_price=Decimal('178.50'))
         from portfolio.models import WatchlistItem
-        WatchlistItem.objects.create(ticker=ticker, notes='Watching for dip')
+        WatchlistItem.objects.create(ticker=ticker, user=self.user, notes='Watching for dip')
         response = self.client.get(reverse('watchlist'))
         self.assertContains(response, 'AAPL')
         self.assertContains(response, 'Watching for dip')
@@ -828,8 +834,11 @@ class PriceTargetInComputeIndicatorsTest(TestCase):
 
 
 class PortfolioAnalysisModelTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
+
     def test_str(self):
-        portfolio = Portfolio.objects.create(name='Test Portfolio')
+        portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         analysis = PortfolioAnalysis.objects.create(
             portfolio=portfolio,
             top_picks_text='Pick 1...',
@@ -838,7 +847,7 @@ class PortfolioAnalysisModelTest(TestCase):
         self.assertIn('Test Portfolio', str(analysis))
 
     def test_one_to_one(self):
-        portfolio = Portfolio.objects.create(name='Test Portfolio')
+        portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         PortfolioAnalysis.objects.create(portfolio=portfolio)
         with self.assertRaises(Exception):
             PortfolioAnalysis.objects.create(portfolio=portfolio)
@@ -846,7 +855,8 @@ class PortfolioAnalysisModelTest(TestCase):
 
 class PortfolioAnalysisServiceTest(TestCase):
     def setUp(self):
-        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.user = User.objects.create_user('testuser', password='testpass')
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         self.ticker1 = Ticker.objects.create(
             symbol='AAPL', company_name='Apple Inc.',
             last_price=Decimal('180.00'), sector='Technology',
@@ -874,7 +884,7 @@ class PortfolioAnalysisServiceTest(TestCase):
             purchase_date=date(2024, 1, 1),
         )
         # Add ticker3 to watchlist only
-        WatchlistItem.objects.create(ticker=self.ticker3)
+        WatchlistItem.objects.create(ticker=self.ticker3, user=self.user)
 
         # Create indicator snapshots
         IndicatorSnapshot.objects.create(ticker=self.ticker1, opportunity_score=80)
@@ -976,7 +986,7 @@ class PortfolioAnalysisServiceTest(TestCase):
 class PortfolioAnalysisViewTest(LoggedInTestCase):
     def setUp(self):
         super().setUp()
-        self.portfolio = Portfolio.objects.create(name='View Test')
+        self.portfolio = Portfolio.objects.create(name='View Test', user=self.user)
         self.ticker = Ticker.objects.create(
             symbol='TEST', last_price=Decimal('100.00'),
         )

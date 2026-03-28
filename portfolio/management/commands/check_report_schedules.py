@@ -54,13 +54,15 @@ class Command(BaseCommand):
         from portfolio.report_service import EmailReportService
 
         now = timezone.localtime(timezone.now())
-        schedules = ReportSchedule.objects.filter(enabled=True)
+        schedules = ReportSchedule.objects.filter(enabled=True).select_related('user')
 
         for schedule in schedules:
             if schedule.is_due(now):
-                self.stdout.write(f"Schedule {schedule} is due, sending report...")
+                self.stdout.write(
+                    f"Schedule {schedule} for user {schedule.user.username} is due, sending report..."
+                )
                 try:
-                    EmailReportService.generate_and_send()
+                    EmailReportService.generate_and_send(user=schedule.user)
                     schedule.last_run = now
                     schedule.save(update_fields=['last_run'])
                     self.stdout.write(self.style.SUCCESS(
@@ -71,4 +73,3 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(
                         f"Failed to send report for schedule {schedule}: {e}"
                     ))
-                break  # Only send one report per check to avoid duplicates

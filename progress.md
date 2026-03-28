@@ -1,6 +1,6 @@
 # MyStocks - Build Progress
 
-## Overall Status: Stage 6.10 - Complete ✅
+## Overall Status: Stage 6.11 - Complete ✅
 
 ---
 
@@ -199,6 +199,25 @@
 
 ---
 
+## Stage 6.11: Multi-User Support & Registration
+**Status:** ✅ Complete
+
+- [x] Added `user` FK to Portfolio, ReportSchedule, and WatchlistItem models
+- [x] Three-step migration: nullable FK → data migration (assign to superuser) → non-nullable FK
+- [x] WatchlistItem.ticker changed from OneToOneField to ForeignKey (per-user watchlists)
+- [x] Registration view with `UserCreationForm` (auto-login after signup)
+- [x] Registration template matching dark theme, linked from login page
+- [x] All portfolio/analysis/market views scoped to `request.user`
+- [x] Lot ownership checked transitively via `portfolio__user=request.user`
+- [x] Report service methods accept `user` parameter for scoped data
+- [x] `check_report_schedules` command sends per-user reports
+- [x] User isolation tests (7 tests: can't view/edit/delete/export other user's data)
+- [x] Registration tests (4 tests: page load, create & auto-login, duplicate, password mismatch)
+- [x] Updated all test files with `user=` on model creations
+- [x] 255 tests, all passing
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Status:** ⬜ Not Started
 
@@ -232,3 +251,4 @@
 | 2026-02-23 | 6.8 | PostgreSQL migration, Dockerfile with gunicorn, env-var config, 178 tests passing on PostgreSQL |
 | 2026-03-25 | 6.9 | Streamlined weekly report: portfolio performance summary + top 5 best buys, removed per-holding detail, 237 tests passing |
 | 2026-03-28 | 6.10 | CSV export: one-click download of portfolio holdings with ticker summary + lot detail rows, 244 tests passing |
+| 2026-03-28 | 6.11 | Multi-user support: user FK on Portfolio/WatchlistItem/ReportSchedule, registration, query scoping, user isolation, 255 tests passing |

@@ -546,9 +546,11 @@ class PortfolioAnalysisService:
             portfolio.lots.values_list('ticker__symbol', flat=True).distinct()
         )
 
-        # Watchlist tickers
+        # Watchlist tickers (scoped to portfolio owner)
         watchlist_symbols = set(
-            WatchlistItem.objects.values_list('ticker__symbol', flat=True)
+            WatchlistItem.objects.filter(
+                user=portfolio.user
+            ).values_list('ticker__symbol', flat=True)
         )
 
         all_symbols = portfolio_symbols | watchlist_symbols
