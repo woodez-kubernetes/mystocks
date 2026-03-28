@@ -416,6 +416,70 @@ class WatchlistItemModelTest(TestCase):
         self.assertEqual(items[0].ticker.symbol, 'MSFT')
 
 
+class PortfolioExportCSVTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.ticker = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('200.00'), sector='Technology',
+            day_change_pct=Decimal('1.25'),
+        )
+        self.lot1 = Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker,
+            shares=Decimal('50'), cost_basis=Decimal('150.00'),
+            purchase_date=date(2024, 1, 15), notes='First buy',
+        )
+        self.lot2 = Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker,
+            shares=Decimal('30'), cost_basis=Decimal('160.00'),
+            purchase_date=date(2024, 6, 1), notes='Added more',
+        )
+
+    def test_csv_content_type(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'text/csv')
+
+    def test_csv_filename(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        self.assertIn('Test_Portfolio_holdings.csv', response['Content-Disposition'])
+
+    def test_csv_row_count(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        content = response.content.decode()
+        lines = [line for line in content.strip().split('\n') if line]
+        # 1 header + 1 ticker summary + 2 lot rows = 4
+        self.assertEqual(len(lines), 4)
+
+    def test_csv_ticker_summary_row(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        content = response.content.decode()
+        lines = content.strip().split('\n')
+        # Second line is the ticker summary
+        self.assertIn('AAPL', lines[1])
+        self.assertIn('Apple Inc.', lines[1])
+        self.assertIn('Technology', lines[1])
+
+    def test_csv_lot_detail_rows(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        content = response.content.decode()
+        # Lot rows are indented with arrow
+        self.assertEqual(content.count('↳'), 2)
+
+    def test_csv_404_for_missing_portfolio(self):
+        response = self.client.get(reverse('portfolio_export_csv', args=[9999]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_csv_includes_opportunity_score(self):
+        from analysis.models import IndicatorSnapshot
+        IndicatorSnapshot.objects.create(ticker=self.ticker, opportunity_score=82)
+        response = self.client.get(reverse('portfolio_export_csv', args=[self.portfolio.pk]))
+        content = response.content.decode()
+        lines = content.strip().split('\n')
+        self.assertIn('82', lines[1])
+
+
 class EmailReportViewTest(LoggedInTestCase):
     def test_get_not_allowed(self):
         response = self.client.get(reverse('send_email_report'))
