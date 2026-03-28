@@ -13,6 +13,9 @@ urlpatterns = [
     path('portfolios/<int:pk>/edit/', views.portfolio_edit, name='portfolio_edit'),
     path('portfolios/<int:pk>/delete/', views.portfolio_delete, name='portfolio_delete'),
 
+    # CSV Export
+    path('portfolios/<int:pk>/export/csv/', views.portfolio_export_csv, name='portfolio_export_csv'),
+
     # Portfolio AI Analysis
     path('portfolios/<int:pk>/analyze/', views.generate_portfolio_analysis, name='generate_portfolio_analysis'),
 

@@ -172,6 +172,24 @@ The report currently shows per-holding details (shares, avg cost, price, value, 
 
 ---
 
+## Stage 6.10: CSV Export of Portfolio Holdings
+**Goal:** Allow users to download their portfolio holdings as a CSV file from the portfolio detail page.
+
+### Tasks
+- [ ] **Add `export_portfolio_csv` view** in `portfolio/views.py` — accepts portfolio PK, returns an `HttpResponse` with `content_type='text/csv'` and `Content-Disposition: attachment; filename="<portfolio_name>_holdings.csv"`
+- [ ] **CSV row structure** — grouped by ticker with a summary row followed by lot detail rows:
+  - **Ticker summary row:** Ticker, Company Name, Sector, Total Shares, Avg Cost, Current Price, Day Change %, Total Value, Total Gain/Loss ($), Total Gain/Loss (%), Opportunity Score
+  - **Lot detail rows (indented):** blank first column (or "  ↳"), "", "", Shares, Cost Basis, Purchase Date, Notes, Lot Value, Lot Gain/Loss ($), Lot Gain/Loss (%), ""
+  - Use `get_holdings()` for ticker-level aggregates; iterate `h['lots']` for per-lot rows beneath each ticker
+  - Look up `IndicatorSnapshot` per ticker for opportunity score
+- [ ] **Add URL route** — `path('<int:pk>/export/', views.export_portfolio_csv, name='portfolio_export_csv')` in `portfolio/urls.py`
+- [ ] **Add download button** to the portfolio detail page — a simple link/button (e.g., "Export CSV") next to the existing refresh button, pointing to the export URL
+- [ ] **Write tests** — verify response content type, filename header, CSV row count matches holdings count, column values are correct, and 404 for nonexistent portfolio
+
+**Deliverables:** One-click CSV download of holdings from any portfolio detail page.
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Goal:** Final UI polish, performance optimization, and deployment readiness.
 

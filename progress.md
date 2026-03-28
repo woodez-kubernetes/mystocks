@@ -1,6 +1,6 @@
 # MyStocks - Build Progress
 
-## Overall Status: Stage 6.9 - Complete ✅
+## Overall Status: Stage 6.10 - Complete ✅
 
 ---
 
@@ -186,6 +186,19 @@
 
 ---
 
+## Stage 6.10: CSV Export of Portfolio Holdings
+**Status:** ✅ Complete
+
+- [x] Added `portfolio_export_csv` view with CSV response and Content-Disposition header
+- [x] CSV columns: Ticker, Company Name, Sector, Shares, Cost Basis, Purchase Date, Notes, Current Price, Day Change %, Current Value, Gain/Loss ($), Gain/Loss (%), Opportunity Score
+- [x] Ticker summary row followed by indented lot detail rows (↳) for each lot
+- [x] URL route: `portfolios/<pk>/export/csv/`
+- [x] "Export CSV" button added to portfolio detail page header
+- [x] 7 new tests (content type, filename, row count, ticker row, lot rows, 404, opportunity score)
+- [x] 244 tests, all passing
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Status:** ⬜ Not Started
 
@@ -218,3 +231,4 @@
 | 2026-02-22 | 6.7 | Email reports & scheduling: HTML email with charts, audit log, report schedules on Settings page, cron command, 178 tests passing |
 | 2026-02-23 | 6.8 | PostgreSQL migration, Dockerfile with gunicorn, env-var config, 178 tests passing on PostgreSQL |
 | 2026-03-25 | 6.9 | Streamlined weekly report: portfolio performance summary + top 5 best buys, removed per-holding detail, 237 tests passing |
+| 2026-03-28 | 6.10 | CSV export: one-click download of portfolio holdings with ticker summary + lot detail rows, 244 tests passing |

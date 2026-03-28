@@ -1,8 +1,11 @@
+import csv
+
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from analysis.models import IndicatorSnapshot
 from .forms import LotForm, PortfolioForm, ReportScheduleForm
 from .models import Lot, Portfolio, ReportAuditLog, ReportSchedule, Ticker
 
@@ -194,6 +197,69 @@ def lot_delete(request, pk):
         'delete_url_pk': lot.pk,
         'portfolio': portfolio,
     })
+
+
+# --- CSV Export ---
+
+def portfolio_export_csv(request, pk):
+    """Download portfolio holdings as a CSV file."""
+    portfolio = get_object_or_404(Portfolio, pk=pk)
+    holdings = portfolio.get_holdings()
+
+    safe_name = portfolio.name.replace(' ', '_').replace('"', '')
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{safe_name}_holdings.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        'Ticker', 'Company Name', 'Sector', 'Shares', 'Cost Basis',
+        'Purchase Date', 'Notes', 'Current Price', 'Day Change %',
+        'Current Value', 'Gain/Loss ($)', 'Gain/Loss (%)', 'Opportunity Score',
+    ])
+
+    for h in holdings:
+        ticker = h['ticker']
+        try:
+            score = ticker.indicators.opportunity_score
+        except IndicatorSnapshot.DoesNotExist:
+            score = ''
+
+        # Ticker summary row
+        writer.writerow([
+            ticker.symbol,
+            ticker.company_name,
+            ticker.sector,
+            h['total_shares'],
+            h['avg_cost'],
+            '',
+            '',
+            ticker.last_price or '',
+            ticker.day_change_pct or '',
+            h['current_value'] or '',
+            h['gain_loss'] or '',
+            f"{h['gain_loss_pct']:.1f}" if h.get('gain_loss_pct') is not None else '',
+            score,
+        ])
+
+        # Lot detail rows
+        for lot in h['lots']:
+            writer.writerow([
+                '  ↳',
+                '',
+                '',
+                lot.shares,
+                lot.cost_basis,
+                lot.purchase_date,
+                lot.notes,
+                '',
+                '',
+                lot.current_value or '',
+                lot.gain_loss or '',
+                f"{lot.gain_loss_pct:.1f}" if lot.gain_loss_pct is not None else '',
+                '',
+            ])
+
+    return response
 
 
 # --- Portfolio AI Analysis ---
