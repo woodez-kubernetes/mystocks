@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 
 
@@ -43,6 +44,10 @@ class Ticker(models.Model):
 
 
 class Portfolio(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='portfolios',
+    )
     name = models.CharField(max_length=200)
     created_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
@@ -190,6 +195,10 @@ class ReportAuditLog(models.Model):
 class ReportSchedule(models.Model):
     DAY_FIELDS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='report_schedules',
+    )
     time = models.TimeField()
     monday = models.BooleanField(default=True)
     tuesday = models.BooleanField(default=True)
@@ -228,14 +237,19 @@ class ReportSchedule(models.Model):
 
 
 class WatchlistItem(models.Model):
-    ticker = models.OneToOneField(
-        Ticker, on_delete=models.CASCADE, related_name='watchlist_entry'
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='watchlist_items',
+    )
+    ticker = models.ForeignKey(
+        Ticker, on_delete=models.CASCADE, related_name='watchlist_entries'
     )
     added_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
 
     class Meta:
         ordering = ['-added_at']
+        unique_together = ('user', 'ticker')
 
     def __str__(self):
         return f"Watchlist: {self.ticker.symbol}"

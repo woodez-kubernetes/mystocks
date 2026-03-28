@@ -109,15 +109,15 @@ class EmailReportService:
     """Assembles and sends the portfolio email report."""
 
     @staticmethod
-    def get_top_picks(limit=5):
-        """Return the top N tickers by opportunity score across portfolios and watchlist."""
+    def get_top_picks(user, limit=5):
+        """Return the top N tickers by opportunity score for a given user."""
         ticker_ids = set()
 
-        for portfolio in Portfolio.objects.prefetch_related('lots__ticker').all():
+        for portfolio in user.portfolios.prefetch_related('lots__ticker').all():
             for lot in portfolio.lots.all():
                 ticker_ids.add(lot.ticker_id)
 
-        for item in WatchlistItem.objects.select_related('ticker').all():
+        for item in user.watchlist_items.select_related('ticker').all():
             ticker_ids.add(item.ticker_id)
 
         if not ticker_ids:
@@ -146,8 +146,8 @@ class EmailReportService:
         return picks
 
     @staticmethod
-    def gather_report_data():
-        portfolios = Portfolio.objects.prefetch_related('lots__ticker').all()
+    def gather_report_data(user):
+        portfolios = user.portfolios.prefetch_related('lots__ticker').all()
         report_portfolios = []
 
         for portfolio in portfolios:
@@ -157,7 +157,7 @@ class EmailReportService:
                 'holdings': holdings,
             })
 
-        top_picks = EmailReportService.get_top_picks()
+        top_picks = EmailReportService.get_top_picks(user)
 
         return {
             'portfolios': report_portfolios,
@@ -166,18 +166,18 @@ class EmailReportService:
         }
 
     @staticmethod
-    def refresh_portfolio_data():
-        """Refresh quotes, indicators, news, and AI analysis for all portfolio tickers."""
+    def refresh_portfolio_data(user):
+        """Refresh quotes, indicators, news, and AI analysis for a user's tickers."""
         import time
         from market.services import StockDataService
         from analysis.services import AIAnalysisService
 
         tickers = set()
-        for portfolio in Portfolio.objects.prefetch_related('lots__ticker').all():
+        for portfolio in user.portfolios.prefetch_related('lots__ticker').all():
             for lot in portfolio.lots.all():
                 tickers.add(lot.ticker)
 
-        for item in WatchlistItem.objects.select_related('ticker').all():
+        for item in user.watchlist_items.select_related('ticker').all():
             tickers.add(item.ticker)
 
         for ticker in tickers:
@@ -194,9 +194,9 @@ class EmailReportService:
         logger.info(f"Report data refresh complete for {len(tickers)} tickers")
 
     @staticmethod
-    def generate_and_send():
-        EmailReportService.refresh_portfolio_data()
-        data = EmailReportService.gather_report_data()
+    def generate_and_send(user):
+        EmailReportService.refresh_portfolio_data(user)
+        data = EmailReportService.gather_report_data(user)
 
         recipient = settings.REPORT_RECIPIENT_EMAIL
         if not recipient:

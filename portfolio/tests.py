@@ -44,8 +44,9 @@ class TickerModelTest(TestCase):
 
 class PortfolioModelTest(TestCase):
     def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
         self.portfolio = Portfolio.objects.create(
-            name='Test Portfolio', notes='Testing'
+            name='Test Portfolio', notes='Testing', user=self.user
         )
         self.ticker = Ticker.objects.create(
             symbol='AAPL', company_name='Apple Inc.', last_price=Decimal('200.00')
@@ -125,7 +126,8 @@ class PortfolioModelTest(TestCase):
 
 class LotModelTest(TestCase):
     def setUp(self):
-        self.portfolio = Portfolio.objects.create(name='Test')
+        self.user = User.objects.create_user('testuser', password='testpass')
+        self.portfolio = Portfolio.objects.create(name='Test', user=self.user)
         self.ticker = Ticker.objects.create(
             symbol='MSFT', last_price=Decimal('420.00')
         )
@@ -188,8 +190,8 @@ class DashboardViewTest(LoggedInTestCase):
         self.assertContains(response, 'Dashboard')
 
     def test_dashboard_shows_portfolio_count(self):
-        Portfolio.objects.create(name='P1')
-        Portfolio.objects.create(name='P2')
+        Portfolio.objects.create(name='P1', user=self.user)
+        Portfolio.objects.create(name='P2', user=self.user)
         response = self.client.get(reverse('dashboard'))
         self.assertContains(response, '2')
 
@@ -207,7 +209,8 @@ class PortfolioFormTest(TestCase):
 
 class LotFormTest(TestCase):
     def setUp(self):
-        self.portfolio = Portfolio.objects.create(name='Test')
+        self.user = User.objects.create_user('testuser', password='testpass')
+        self.portfolio = Portfolio.objects.create(name='Test', user=self.user)
         self.ticker = Ticker.objects.create(symbol='AAPL')
 
     def test_valid_form_existing_ticker(self):
@@ -266,7 +269,7 @@ class PortfolioListViewTest(LoggedInTestCase):
         self.assertContains(response, 'Portfolios')
 
     def test_list_shows_portfolios(self):
-        Portfolio.objects.create(name='Tech Growth')
+        Portfolio.objects.create(name='Tech Growth', user=self.user)
         response = self.client.get(reverse('portfolio_list'))
         self.assertContains(response, 'Tech Growth')
 
@@ -274,7 +277,7 @@ class PortfolioListViewTest(LoggedInTestCase):
 class PortfolioDetailViewTest(LoggedInTestCase):
     def setUp(self):
         super().setUp()
-        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         self.ticker = Ticker.objects.create(
             symbol='AAPL', company_name='Apple Inc.', last_price=Decimal('178.50')
         )
@@ -303,10 +306,11 @@ class PortfolioCRUDViewTest(LoggedInTestCase):
             'notes': 'Test notes',
         })
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Portfolio.objects.filter(name='New Portfolio').exists())
+        p = Portfolio.objects.get(name='New Portfolio')
+        self.assertEqual(p.user, self.user)
 
     def test_edit_portfolio(self):
-        portfolio = Portfolio.objects.create(name='Old Name')
+        portfolio = Portfolio.objects.create(name='Old Name', user=self.user)
         response = self.client.post(reverse('portfolio_edit', args=[portfolio.pk]), {
             'name': 'New Name',
             'notes': '',
@@ -316,7 +320,7 @@ class PortfolioCRUDViewTest(LoggedInTestCase):
         self.assertEqual(portfolio.name, 'New Name')
 
     def test_delete_portfolio(self):
-        portfolio = Portfolio.objects.create(name='To Delete')
+        portfolio = Portfolio.objects.create(name='To Delete', user=self.user)
         response = self.client.post(reverse('portfolio_delete', args=[portfolio.pk]))
         self.assertEqual(response.status_code, 302)
         self.assertFalse(Portfolio.objects.filter(pk=portfolio.pk).exists())
@@ -325,7 +329,7 @@ class PortfolioCRUDViewTest(LoggedInTestCase):
 class LotCRUDViewTest(LoggedInTestCase):
     def setUp(self):
         super().setUp()
-        self.portfolio = Portfolio.objects.create(name='Test')
+        self.portfolio = Portfolio.objects.create(name='Test', user=self.user)
         self.ticker = Ticker.objects.create(symbol='AAPL')
 
     def test_create_lot(self):
@@ -393,24 +397,37 @@ class TickerSearchViewTest(LoggedInTestCase):
 
 
 class WatchlistItemModelTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
+
     def test_create_watchlist_item(self):
         ticker = Ticker.objects.create(symbol='AAPL')
-        item = WatchlistItem.objects.create(ticker=ticker, notes='Watching for dip')
+        item = WatchlistItem.objects.create(
+            user=self.user, ticker=ticker, notes='Watching for dip'
+        )
         self.assertEqual(str(item), 'Watchlist: AAPL')
         self.assertIsNotNone(item.added_at)
         self.assertEqual(item.notes, 'Watching for dip')
 
-    def test_unique_ticker(self):
+    def test_unique_per_user(self):
         ticker = Ticker.objects.create(symbol='AAPL')
-        WatchlistItem.objects.create(ticker=ticker)
+        WatchlistItem.objects.create(user=self.user, ticker=ticker)
         with self.assertRaises(Exception):
-            WatchlistItem.objects.create(ticker=ticker)
+            WatchlistItem.objects.create(user=self.user, ticker=ticker)
+
+    def test_different_users_same_ticker(self):
+        """Two users can watch the same ticker."""
+        user2 = User.objects.create_user('user2', password='testpass')
+        ticker = Ticker.objects.create(symbol='AAPL')
+        WatchlistItem.objects.create(user=self.user, ticker=ticker)
+        WatchlistItem.objects.create(user=user2, ticker=ticker)
+        self.assertEqual(WatchlistItem.objects.count(), 2)
 
     def test_ordering(self):
         t1 = Ticker.objects.create(symbol='AAPL')
         t2 = Ticker.objects.create(symbol='MSFT')
-        WatchlistItem.objects.create(ticker=t1)
-        WatchlistItem.objects.create(ticker=t2)
+        WatchlistItem.objects.create(user=self.user, ticker=t1)
+        WatchlistItem.objects.create(user=self.user, ticker=t2)
         items = list(WatchlistItem.objects.all())
         # Most recent first
         self.assertEqual(items[0].ticker.symbol, 'MSFT')
@@ -419,7 +436,7 @@ class WatchlistItemModelTest(TestCase):
 class PortfolioExportCSVTest(LoggedInTestCase):
     def setUp(self):
         super().setUp()
-        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         self.ticker = Ticker.objects.create(
             symbol='AAPL', company_name='Apple Inc.',
             last_price=Decimal('200.00'), sector='Technology',
@@ -521,7 +538,8 @@ class EmailReportViewTest(LoggedInTestCase):
 
 class EmailReportServiceTest(TestCase):
     def setUp(self):
-        self.portfolio = Portfolio.objects.create(name='Test Portfolio')
+        self.user = User.objects.create_user('testuser', password='testpass')
+        self.portfolio = Portfolio.objects.create(name='Test Portfolio', user=self.user)
         self.ticker = Ticker.objects.create(
             symbol='AAPL', company_name='Apple Inc.',
             last_price=Decimal('200.00'), sector='Technology',
@@ -534,7 +552,7 @@ class EmailReportServiceTest(TestCase):
 
     def test_gather_report_data(self):
         from portfolio.report_service import EmailReportService
-        data = EmailReportService.gather_report_data()
+        data = EmailReportService.gather_report_data(self.user)
         self.assertEqual(len(data['portfolios']), 1)
         pdata = data['portfolios'][0]
         self.assertEqual(pdata['portfolio'].name, 'Test Portfolio')
@@ -546,7 +564,7 @@ class EmailReportServiceTest(TestCase):
     def test_gather_report_data_no_holdings_data(self):
         """Report data should not contain per-holding detail breakdowns."""
         from portfolio.report_service import EmailReportService
-        data = EmailReportService.gather_report_data()
+        data = EmailReportService.gather_report_data(self.user)
         pdata = data['portfolios'][0]
         self.assertNotIn('holdings_data', pdata)
 
@@ -556,7 +574,7 @@ class EmailReportServiceTest(TestCase):
         IndicatorSnapshot.objects.create(
             ticker=self.ticker, opportunity_score=85,
         )
-        picks = EmailReportService.get_top_picks()
+        picks = EmailReportService.get_top_picks(self.user)
         self.assertEqual(len(picks), 1)
         self.assertEqual(picks[0]['ticker'].symbol, 'AAPL')
         self.assertEqual(picks[0]['indicators'].opportunity_score, 85)
@@ -576,7 +594,7 @@ class EmailReportServiceTest(TestCase):
             IndicatorSnapshot.objects.create(
                 ticker=t, opportunity_score=50 + i * 5,
             )
-        picks = EmailReportService.get_top_picks()
+        picks = EmailReportService.get_top_picks(self.user)
         self.assertEqual(len(picks), 5)
         # Should be sorted descending by score
         scores = [p['indicators'].opportunity_score for p in picks]
@@ -588,11 +606,11 @@ class EmailReportServiceTest(TestCase):
         watch_ticker = Ticker.objects.create(
             symbol='WATCH', last_price=Decimal('50.00'),
         )
-        WatchlistItem.objects.create(ticker=watch_ticker)
+        WatchlistItem.objects.create(user=self.user, ticker=watch_ticker)
         IndicatorSnapshot.objects.create(
             ticker=watch_ticker, opportunity_score=95,
         )
-        picks = EmailReportService.get_top_picks()
+        picks = EmailReportService.get_top_picks(self.user)
         symbols = [p['ticker'].symbol for p in picks]
         self.assertIn('WATCH', symbols)
 
@@ -634,7 +652,7 @@ class EmailReportServiceTest(TestCase):
             REPORT_RECIPIENT_EMAIL='test@example.com',
             DEFAULT_FROM_EMAIL='sender@example.com',
         ):
-            EmailReportService.generate_and_send()
+            EmailReportService.generate_and_send(user=self.user)
             mock_refresh.assert_called_once()
             mock_conn.connection.sendmail.assert_called_once()
 
@@ -643,12 +661,15 @@ class EmailReportServiceTest(TestCase):
         from portfolio.report_service import EmailReportService
         with self.settings(REPORT_RECIPIENT_EMAIL=''):
             with self.assertRaises(ValueError):
-                EmailReportService.generate_and_send()
+                EmailReportService.generate_and_send(user=self.user)
 
 
 class ReportScheduleModelTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
+
     def test_create_schedule_defaults(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         self.assertTrue(schedule.enabled)
         self.assertTrue(schedule.monday)
         self.assertTrue(schedule.tuesday)
@@ -659,7 +680,7 @@ class ReportScheduleModelTest(TestCase):
 
     def test_str(self):
         schedule = ReportSchedule.objects.create(
-            time=time(8, 0), monday=True, tuesday=False,
+            time=time(8, 0), user=self.user, monday=True, tuesday=False,
             wednesday=True, thursday=False, friday=True,
         )
         s = str(schedule)
@@ -668,45 +689,49 @@ class ReportScheduleModelTest(TestCase):
         self.assertIn('Wed', s)
 
     def test_is_due_correct_day_and_time(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         # Monday 8:00 AM
         now = datetime(2026, 2, 23, 8, 0, 0)  # Monday
         self.assertTrue(schedule.is_due(now))
 
     def test_is_due_wrong_day(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0), monday=False)
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user, monday=False
+        )
         now = datetime(2026, 2, 23, 8, 0, 0)  # Monday
         self.assertFalse(schedule.is_due(now))
 
     def test_is_due_weekend(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 22, 8, 0, 0)  # Sunday
         self.assertFalse(schedule.is_due(now))
 
     def test_is_due_wrong_time(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 23, 10, 0, 0)  # Monday but 10 AM
         self.assertFalse(schedule.is_due(now))
 
     def test_is_due_already_run_today(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 23, 8, 0, 0, tzinfo=timezone.get_current_timezone())
         schedule.last_run = now
         schedule.save()
         self.assertFalse(schedule.is_due(now))
 
     def test_is_due_disabled(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0), enabled=False)
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user, enabled=False
+        )
         now = datetime(2026, 2, 23, 8, 0, 0)
         self.assertFalse(schedule.is_due(now))
 
     def test_is_due_within_window(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 23, 8, 1, 30)  # 1.5 minutes after
         self.assertTrue(schedule.is_due(now))
 
     def test_is_due_outside_window(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 23, 8, 2, 1)  # Just over 2 minutes
         self.assertFalse(schedule.is_due(now))
 
@@ -726,9 +751,12 @@ class ReportScheduleViewTest(LoggedInTestCase):
         self.assertTrue(schedule.monday)
         self.assertFalse(schedule.tuesday)
         self.assertTrue(schedule.wednesday)
+        self.assertEqual(schedule.user, self.user)
 
     def test_edit_schedule(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user
+        )
         response = self.client.post(
             reverse('schedule_edit', args=[schedule.pk]),
             {'time': '09:30', 'monday': 'on', 'friday': 'on'},
@@ -741,7 +769,9 @@ class ReportScheduleViewTest(LoggedInTestCase):
         self.assertFalse(schedule.tuesday)
 
     def test_delete_schedule(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user
+        )
         response = self.client.post(
             reverse('schedule_delete', args=[schedule.pk]),
             HTTP_HX_REQUEST='true',
@@ -750,7 +780,9 @@ class ReportScheduleViewTest(LoggedInTestCase):
         self.assertEqual(ReportSchedule.objects.count(), 0)
 
     def test_toggle_schedule(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0), enabled=True)
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user, enabled=True
+        )
         response = self.client.post(
             reverse('schedule_toggle', args=[schedule.pk]),
             HTTP_HX_REQUEST='true',
@@ -760,7 +792,9 @@ class ReportScheduleViewTest(LoggedInTestCase):
         self.assertFalse(schedule.enabled)
 
     def test_toggle_schedule_enable(self):
-        schedule = ReportSchedule.objects.create(time=time(8, 0), enabled=False)
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user, enabled=False
+        )
         self.client.post(
             reverse('schedule_toggle', args=[schedule.pk]),
             HTTP_HX_REQUEST='true',
@@ -770,22 +804,27 @@ class ReportScheduleViewTest(LoggedInTestCase):
 
 
 class CheckReportSchedulesCommandTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('testuser', password='testpass')
+
     @patch('portfolio.report_service.EmailReportService.generate_and_send')
     def test_sends_when_due(self, mock_send):
-        schedule = ReportSchedule.objects.create(time=time(8, 0))
+        schedule = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user
+        )
         now = datetime(2026, 2, 23, 8, 0, 0, tzinfo=timezone.get_current_timezone())
         with patch('portfolio.management.commands.check_report_schedules.timezone') as mock_tz:
             mock_tz.now.return_value = now
             mock_tz.localtime.return_value = now
             from django.core.management import call_command
             call_command('check_report_schedules', '--once')
-        mock_send.assert_called_once()
+        mock_send.assert_called_once_with(user=self.user)
         schedule.refresh_from_db()
         self.assertIsNotNone(schedule.last_run)
 
     @patch('portfolio.report_service.EmailReportService.generate_and_send')
     def test_skips_when_not_due(self, mock_send):
-        ReportSchedule.objects.create(time=time(8, 0))
+        ReportSchedule.objects.create(time=time(8, 0), user=self.user)
         now = datetime(2026, 2, 23, 15, 0, 0, tzinfo=timezone.get_current_timezone())
         with patch('portfolio.management.commands.check_report_schedules.timezone') as mock_tz:
             mock_tz.now.return_value = now
@@ -796,7 +835,9 @@ class CheckReportSchedulesCommandTest(TestCase):
 
     @patch('portfolio.report_service.EmailReportService.generate_and_send')
     def test_skips_disabled(self, mock_send):
-        ReportSchedule.objects.create(time=time(8, 0), enabled=False)
+        ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user, enabled=False
+        )
         now = datetime(2026, 2, 23, 8, 0, 0, tzinfo=timezone.get_current_timezone())
         with patch('portfolio.management.commands.check_report_schedules.timezone') as mock_tz:
             mock_tz.now.return_value = now
@@ -804,3 +845,97 @@ class CheckReportSchedulesCommandTest(TestCase):
             from django.core.management import call_command
             call_command('check_report_schedules', '--once')
         mock_send.assert_not_called()
+
+
+class RegistrationTest(TestCase):
+    def test_register_page_loads(self):
+        response = self.client.get(reverse('register'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Create Account')
+
+    def test_register_creates_user_and_logs_in(self):
+        response = self.client.post(reverse('register'), {
+            'username': 'newuser',
+            'password1': 'testpass123!',
+            'password2': 'testpass123!',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(User.objects.filter(username='newuser').exists())
+        # Should be logged in - can access dashboard
+        dashboard = self.client.get(reverse('dashboard'))
+        self.assertEqual(dashboard.status_code, 200)
+
+    def test_register_duplicate_username(self):
+        User.objects.create_user('existing', password='testpass')
+        response = self.client.post(reverse('register'), {
+            'username': 'existing',
+            'password1': 'testpass123!',
+            'password2': 'testpass123!',
+        })
+        self.assertEqual(response.status_code, 200)  # re-renders form
+        self.assertContains(response, 'already exists')
+
+    def test_register_password_mismatch(self):
+        response = self.client.post(reverse('register'), {
+            'username': 'newuser',
+            'password1': 'testpass123!',
+            'password2': 'different123!',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username='newuser').exists())
+
+
+class UserIsolationTest(TestCase):
+    """Test that users cannot access each other's data."""
+    def setUp(self):
+        self.user_a = User.objects.create_user('user_a', password='testpass')
+        self.user_b = User.objects.create_user('user_b', password='testpass')
+        self.client_a = Client()
+        self.client_a.force_login(self.user_a)
+        self.client_b = Client()
+        self.client_b.force_login(self.user_b)
+
+        self.portfolio_a = Portfolio.objects.create(name='A Portfolio', user=self.user_a)
+        self.portfolio_b = Portfolio.objects.create(name='B Portfolio', user=self.user_b)
+
+    def test_user_b_cannot_see_user_a_portfolio(self):
+        response = self.client_b.get(
+            reverse('portfolio_detail', args=[self.portfolio_a.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_user_b_cannot_edit_user_a_portfolio(self):
+        response = self.client_b.post(
+            reverse('portfolio_edit', args=[self.portfolio_a.pk]),
+            {'name': 'Hacked', 'notes': ''},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_user_b_cannot_delete_user_a_portfolio(self):
+        response = self.client_b.post(
+            reverse('portfolio_delete', args=[self.portfolio_a.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Portfolio.objects.filter(pk=self.portfolio_a.pk).exists())
+
+    def test_user_b_cannot_export_user_a_csv(self):
+        response = self.client_b.get(
+            reverse('portfolio_export_csv', args=[self.portfolio_a.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_portfolio_list_only_shows_own(self):
+        response = self.client_a.get(reverse('portfolio_list'))
+        self.assertContains(response, 'A Portfolio')
+        self.assertNotContains(response, 'B Portfolio')
+
+    def test_schedule_isolation(self):
+        schedule_a = ReportSchedule.objects.create(
+            time=time(8, 0), user=self.user_a
+        )
+        response = self.client_b.post(
+            reverse('schedule_delete', args=[schedule_a.pk]),
+            HTTP_HX_REQUEST='true',
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(ReportSchedule.objects.filter(pk=schedule_a.pk).exists())
