@@ -1,5 +1,6 @@
 import hashlib
 import logging
+from datetime import date, timedelta
 from decimal import Decimal
 
 import ollama
@@ -9,7 +10,10 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator
 from ta.volatility import BollingerBands
 
-from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot, PortfolioAnalysis
+from analysis.models import (
+    AIAnalysis, IndicatorSnapshot, OptionsSnapshot, PortfolioAnalysis,
+    SECFiling, WhaleActivity,
+)
 from market.models import PriceHistory
 
 logger = logging.getLogger(__name__)
@@ -828,3 +832,311 @@ class PortfolioAnalysisService:
         )
         logger.info(f"Portfolio '{portfolio.name}': analysis generated")
         return analysis_obj
+
+
+class WhaleDetectionService:
+
+    @staticmethod
+    def detect_whale_activity(ticker):
+        """Main entry point: analyze SEC, options, and volume signals for whale activity."""
+        try:
+            sec_signals = WhaleDetectionService._analyze_sec_activity(ticker)
+            options_signals = WhaleDetectionService._analyze_options_flow(ticker)
+            volume_signals = WhaleDetectionService._analyze_volume_anomalies(ticker)
+
+            signal, confidence, details = WhaleDetectionService._compute_whale_signal(
+                sec_signals, options_signals, volume_signals
+            )
+
+            return WhaleDetectionService._store_daily_snapshot(
+                ticker, signal, confidence,
+                sec_signals, options_signals, volume_signals, details
+            )
+        except Exception:
+            logger.exception(f"Whale detection failed for {ticker.symbol}")
+            return None
+
+    @staticmethod
+    def _analyze_sec_activity(ticker):
+        """Analyze SEC filings for insider and institutional activity."""
+        now = date.today()
+        thirty_days_ago = now - timedelta(days=30)
+        ninety_days_ago = now - timedelta(days=90)
+
+        # Form 4 insider transactions (last 30 days)
+        form4s = SECFiling.objects.filter(
+            ticker=ticker, form_type='4',
+            filed_at__date__gte=thirty_days_ago,
+        )
+        buys = form4s.filter(transaction_type='buy')
+        sells = form4s.filter(transaction_type__in=['sell', 'disposition'])
+
+        insider_buy_count = buys.count()
+        insider_sell_count = sells.count()
+
+        buy_value = sum(
+            f.total_value for f in buys if f.total_value
+        ) or Decimal('0')
+        sell_value = sum(
+            f.total_value for f in sells if f.total_value
+        ) or Decimal('0')
+        insider_net_value = buy_value - sell_value
+
+        # Cluster buying: 3+ distinct insiders buying within 14 days
+        fourteen_days_ago = now - timedelta(days=14)
+        recent_buyers = (
+            form4s.filter(
+                transaction_type='buy',
+                filed_at__date__gte=fourteen_days_ago,
+            )
+            .values_list('filer_name', flat=True)
+            .distinct()
+        )
+        cluster_buy = len(set(recent_buyers)) >= 3
+
+        # 13D/G filings (last 90 days)
+        has_13d = SECFiling.objects.filter(
+            ticker=ticker,
+            form_type__startswith='SC 13',
+            filed_at__date__gte=ninety_days_ago,
+        ).exists()
+
+        # Recent Form 4 details for the detail view
+        recent_form4s = []
+        for f in form4s.order_by('-filed_at')[:5]:
+            recent_form4s.append({
+                'date': f.filed_at.strftime('%Y-%m-%d'),
+                'name': f.filer_name,
+                'title': f.filer_title,
+                'type': f.transaction_type,
+                'shares': float(f.shares) if f.shares else 0,
+                'value': float(f.total_value) if f.total_value else 0,
+            })
+
+        # Compute SEC sub-score (0-100, 50=neutral)
+        score = 50
+        # Insider activity: net buys push score up, net sells push down
+        if insider_buy_count > insider_sell_count:
+            score += min(25, (insider_buy_count - insider_sell_count) * 8)
+        elif insider_sell_count > insider_buy_count:
+            score -= min(25, (insider_sell_count - insider_buy_count) * 8)
+
+        # Cluster buying is a strong signal
+        if cluster_buy:
+            score += 15
+
+        # 13D is a major event
+        if has_13d:
+            score += 10
+
+        score = max(0, min(100, score))
+
+        return {
+            'insider_buy_count': insider_buy_count,
+            'insider_sell_count': insider_sell_count,
+            'insider_net_value': insider_net_value,
+            'institutional_change_pct': None,
+            'has_13d_filing': has_13d,
+            'cluster_buy': cluster_buy,
+            'recent_form4s': recent_form4s,
+            'sub_score': score,
+        }
+
+    @staticmethod
+    def _analyze_options_flow(ticker):
+        """Analyze options data for unusual institutional activity."""
+        options_volume_ratio = None
+        oi_change_ratio = None
+        score = 50
+
+        try:
+            opts = ticker.options_snapshot
+            if opts.has_unusual_activity:
+                score += 20
+            if opts.put_call_volume_ratio:
+                pcr = float(opts.put_call_volume_ratio)
+                if pcr < 0.7:
+                    # Low put/call ratio = bullish
+                    score += 10
+                elif pcr > 1.3:
+                    # High put/call ratio = bearish
+                    score -= 10
+            if opts.put_call_oi_ratio:
+                # Check for OI shift vs previous day
+                prev = WhaleActivity.objects.filter(
+                    ticker=ticker, date__lt=date.today()
+                ).order_by('-date').first()
+                if prev and prev.details.get('prev_oi_ratio'):
+                    prev_ratio = float(prev.details['prev_oi_ratio'])
+                    curr_ratio = float(opts.put_call_oi_ratio)
+                    oi_change_ratio = Decimal(str(round(curr_ratio - prev_ratio, 4)))
+                    if abs(curr_ratio - prev_ratio) > 0.3:
+                        if curr_ratio > prev_ratio:
+                            score -= 15  # More puts = bearish
+                        else:
+                            score += 15  # Fewer puts = bullish
+
+                options_volume_ratio = opts.put_call_volume_ratio
+        except Exception:
+            pass
+
+        score = max(0, min(100, score))
+
+        return {
+            'options_volume_ratio': options_volume_ratio,
+            'oi_change_ratio': oi_change_ratio,
+            'sub_score': score,
+        }
+
+    @staticmethod
+    def _analyze_volume_anomalies(ticker):
+        """Analyze volume patterns for block trades and accumulation signals."""
+        block_trade_detected = False
+        volume_price_divergence = None
+        score = 50
+
+        prices = list(
+            PriceHistory.objects.filter(ticker=ticker)
+            .order_by('-date')[:21]
+            .values_list('volume', 'close', flat=False)
+        )
+
+        if len(prices) >= 2:
+            today_vol = prices[0][0] or 0
+            today_close = prices[0][1] or Decimal('0')
+
+            # 20-day average volume
+            hist_vols = [p[0] for p in prices[1:] if p[0]]
+            if hist_vols:
+                avg_vol = sum(hist_vols) / len(hist_vols)
+                if avg_vol > 0:
+                    vol_ratio = today_vol / avg_vol
+
+                    # Block trade: daily volume > 5x average
+                    if vol_ratio > 5:
+                        block_trade_detected = True
+                        score += 15
+
+                    # Volume-price divergence: high volume + low price change
+                    if len(prices) >= 2 and prices[1][1] and today_close:
+                        pct_change = abs(
+                            float(today_close - prices[1][1]) / float(prices[1][1])
+                        ) * 100
+                        if vol_ratio > 2 and pct_change < 0.5:
+                            volume_price_divergence = Decimal(
+                                str(round(vol_ratio / max(pct_change, 0.01), 4))
+                            )
+                            score += 10
+
+        score = max(0, min(100, score))
+
+        return {
+            'block_trade_detected': block_trade_detected,
+            'volume_price_divergence': volume_price_divergence,
+            'sub_score': score,
+        }
+
+    @staticmethod
+    def _compute_whale_signal(sec_signals, options_signals, volume_signals):
+        """Combine all signals into overall whale signal with confidence."""
+        # Weighted: SEC 50%, options 30%, volume 20%
+        weighted_score = (
+            sec_signals['sub_score'] * 0.5
+            + options_signals['sub_score'] * 0.3
+            + volume_signals['sub_score'] * 0.2
+        )
+
+        if weighted_score >= 60:
+            signal = 'bullish'
+        elif weighted_score <= 40:
+            signal = 'bearish'
+        else:
+            signal = 'neutral'
+
+        confidence = min(100, int(abs(weighted_score - 50) * 2))
+
+        # Boost confidence for high-conviction events
+        if sec_signals.get('cluster_buy') or sec_signals.get('has_13d_filing'):
+            confidence = min(100, confidence + 20)
+
+        # Build summary
+        parts = []
+        if sec_signals['insider_buy_count']:
+            n = sec_signals['insider_buy_count']
+            parts.append(f"{n} insider buy{'s' if n > 1 else ''}")
+        if sec_signals['insider_sell_count']:
+            n = sec_signals['insider_sell_count']
+            parts.append(f"{n} insider sell{'s' if n > 1 else ''}")
+        if sec_signals['has_13d_filing']:
+            parts.append("activist position")
+        if options_signals['options_volume_ratio']:
+            parts.append("unusual options volume")
+        if volume_signals['block_trade_detected']:
+            parts.append("block trade")
+        summary = " + ".join(parts) if parts else "Normal activity"
+
+        details = {
+            'sec': {k: v for k, v in sec_signals.items() if k != 'sub_score'},
+            'options': {k: v for k, v in options_signals.items() if k != 'sub_score'},
+            'volume': {k: v for k, v in volume_signals.items() if k != 'sub_score'},
+            'weighted_score': round(weighted_score, 1),
+            'summary': summary,
+            'recent_form4s': sec_signals.get('recent_form4s', []),
+            'cluster_buy': sec_signals.get('cluster_buy', False),
+        }
+
+        # Store current OI ratio for next-day delta
+        if options_signals.get('options_volume_ratio') is not None:
+            try:
+                opts = OptionsSnapshot.objects.get(ticker__symbol=sec_signals.get('ticker_symbol', ''))
+                if opts.put_call_oi_ratio:
+                    details['prev_oi_ratio'] = float(opts.put_call_oi_ratio)
+            except Exception:
+                pass
+
+        # Serialize Decimal values in details
+        details = _serialize_details(details)
+
+        return signal, confidence, details
+
+    @staticmethod
+    def _store_daily_snapshot(ticker, signal, confidence, sec_signals, options_signals, volume_signals, details):
+        """Create or update today's WhaleActivity record."""
+        # Store current OI ratio for next-day delta
+        try:
+            opts = ticker.options_snapshot
+            if opts.put_call_oi_ratio:
+                details['prev_oi_ratio'] = float(opts.put_call_oi_ratio)
+        except Exception:
+            pass
+
+        whale, _ = WhaleActivity.objects.update_or_create(
+            ticker=ticker,
+            date=date.today(),
+            defaults={
+                'signal': signal,
+                'confidence': confidence,
+                'insider_buy_count': sec_signals['insider_buy_count'],
+                'insider_sell_count': sec_signals['insider_sell_count'],
+                'insider_net_value': sec_signals['insider_net_value'],
+                'institutional_change_pct': sec_signals.get('institutional_change_pct'),
+                'has_13d_filing': sec_signals['has_13d_filing'],
+                'options_volume_ratio': options_signals.get('options_volume_ratio'),
+                'oi_change_ratio': options_signals.get('oi_change_ratio'),
+                'block_trade_detected': volume_signals['block_trade_detected'],
+                'volume_price_divergence': volume_signals.get('volume_price_divergence'),
+                'details': details,
+            }
+        )
+        return whale
+
+
+def _serialize_details(obj):
+    """Recursively convert Decimal values to float for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _serialize_details(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_serialize_details(v) for v in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    return obj

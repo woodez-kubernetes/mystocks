@@ -1,6 +1,6 @@
 # MyStocks - Build Progress
 
-## Overall Status: Stage 6.11 - Complete ✅
+## Overall Status: Stage 6.12 - Complete ✅
 
 ---
 
@@ -218,6 +218,23 @@
 
 ---
 
+## Stage 6.12: Whale Activity Tracking
+**Status:** ✅ Complete
+
+- [x] `CIKMapping` model (OneToOne to Ticker, caches SEC CIK lookups)
+- [x] `SECFiling` model (Form 4, 13D/G filings with transaction details, accession_number dedup)
+- [x] `WhaleActivity` model (daily snapshots per ticker: signal, confidence, SEC + options + volume metrics)
+- [x] `SECFilingService` (EDGAR API: CIK resolution, Form 4 XML parsing, 13D detection, rate limiting)
+- [x] `WhaleDetectionService` (SEC 50%, options 30%, volume 20% weighted scoring, cluster buy detection)
+- [x] Refresh pipeline integration (steps 7-8 in `refresh_ticker`: SEC fetch + whale detection)
+- [x] Whale indicator column in holdings table (whale emoji + arrow, color-coded, confidence %)
+- [x] Expandable whale detail row (insider activity table, institutional holdings, 13D alerts, options flow, volume anomalies)
+- [x] Admin registration for all 3 new models
+- [x] 28 new tests (model, service, view, integration)
+- [x] 283 tests, all passing
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Status:** ⬜ Not Started
 
@@ -252,3 +269,4 @@
 | 2026-03-25 | 6.9 | Streamlined weekly report: portfolio performance summary + top 5 best buys, removed per-holding detail, 237 tests passing |
 | 2026-03-28 | 6.10 | CSV export: one-click download of portfolio holdings with ticker summary + lot detail rows, 244 tests passing |
 | 2026-03-28 | 6.11 | Multi-user support: user FK on Portfolio/WatchlistItem/ReportSchedule, registration, query scoping, user isolation, 255 tests passing |
+| 2026-03-28 | 6.12 | Whale activity tracking: SEC EDGAR (Form 4, 13D), options flow, volume anomalies, weighted scoring, holdings table indicator + detail row, 283 tests passing |

@@ -219,6 +219,20 @@ class StockDataService:
         except Exception:
             logger.exception(f"Failed to compute indicators for {symbol}")
 
+        # 7. Fetch SEC filing data (rate-limited, skip if recent)
+        try:
+            from analysis.sec_service import SECFilingService
+            SECFilingService.refresh_sec_data(ticker_obj)
+        except Exception:
+            logger.exception(f"Failed to fetch SEC data for {symbol}")
+
+        # 8. Detect whale activity (combines SEC + options + volume signals)
+        try:
+            from analysis.services import WhaleDetectionService
+            WhaleDetectionService.detect_whale_activity(ticker_obj)
+        except Exception:
+            logger.exception(f"Failed to detect whale activity for {symbol}")
+
         return ticker_obj
 
     @staticmethod

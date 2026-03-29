@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 
@@ -5,6 +7,20 @@ SIGNAL_CHOICES = [
     ('buy', 'Buy'),
     ('hold', 'Hold'),
     ('sell', 'Sell'),
+]
+
+TRANSACTION_TYPE_CHOICES = [
+    ('buy', 'Buy'),
+    ('sell', 'Sell'),
+    ('exercise', 'Exercise'),
+    ('acquisition', 'Acquisition'),
+    ('disposition', 'Disposition'),
+]
+
+WHALE_SIGNAL_CHOICES = [
+    ('bullish', 'Bullish'),
+    ('bearish', 'Bearish'),
+    ('neutral', 'Neutral'),
 ]
 
 
@@ -141,3 +157,96 @@ class PortfolioAnalysis(models.Model):
 
     def __str__(self):
         return f'{self.portfolio.name} portfolio analysis ({self.generated_at})'
+
+
+class CIKMapping(models.Model):
+    ticker = models.OneToOneField(
+        'portfolio.Ticker', on_delete=models.CASCADE, related_name='cik_mapping'
+    )
+    cik = models.CharField(max_length=10)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.ticker.symbol} -> CIK {self.cik}'
+
+
+class SECFiling(models.Model):
+    ticker = models.ForeignKey(
+        'portfolio.Ticker', on_delete=models.CASCADE, related_name='sec_filings'
+    )
+    form_type = models.CharField(max_length=20)
+    filed_at = models.DateTimeField()
+    filer_name = models.CharField(max_length=300)
+    filer_title = models.CharField(max_length=200, blank=True)
+    transaction_type = models.CharField(max_length=15, choices=TRANSACTION_TYPE_CHOICES)
+    shares = models.DecimalField(max_digits=16, decimal_places=4, null=True, blank=True)
+    price_per_share = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    total_value = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
+    ownership_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    accession_number = models.CharField(max_length=30)
+    raw_data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('ticker', 'accession_number')
+        ordering = ['-filed_at']
+
+    def __str__(self):
+        return f'{self.ticker.symbol} {self.form_type} by {self.filer_name} ({self.filed_at:%Y-%m-%d})'
+
+
+class WhaleActivity(models.Model):
+    ticker = models.ForeignKey(
+        'portfolio.Ticker', on_delete=models.CASCADE, related_name='whale_activities'
+    )
+    date = models.DateField()
+    signal = models.CharField(max_length=10, choices=WHALE_SIGNAL_CHOICES, default='neutral')
+    confidence = models.IntegerField(default=0)
+
+    # SEC filing signals
+    insider_buy_count = models.IntegerField(default=0)
+    insider_sell_count = models.IntegerField(default=0)
+    insider_net_value = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal('0'))
+    institutional_change_pct = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True
+    )
+    has_13d_filing = models.BooleanField(default=False)
+
+    # Options/volume signals
+    options_volume_ratio = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True
+    )
+    oi_change_ratio = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True
+    )
+    block_trade_detected = models.BooleanField(default=False)
+    volume_price_divergence = models.DecimalField(
+        max_digits=8, decimal_places=4, null=True, blank=True
+    )
+
+    # Combined
+    details = models.JSONField(default=dict, blank=True)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('ticker', 'date')
+        ordering = ['-date']
+        verbose_name_plural = 'Whale activities'
+
+    def __str__(self):
+        return f'{self.ticker.symbol} {self.date} {self.signal} ({self.confidence}%)'
+
+    @property
+    def summary_text(self):
+        parts = []
+        if self.insider_buy_count:
+            parts.append(f"{self.insider_buy_count} insider buy{'s' if self.insider_buy_count > 1 else ''}")
+        if self.insider_sell_count:
+            parts.append(f"{self.insider_sell_count} insider sell{'s' if self.insider_sell_count > 1 else ''}")
+        if self.has_13d_filing:
+            parts.append("activist position")
+        if self.options_volume_ratio and self.options_volume_ratio > 3:
+            parts.append("unusual options volume")
+        if self.block_trade_detected:
+            parts.append("block trade")
+        return " + ".join(parts) if parts else "Normal activity"

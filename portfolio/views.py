@@ -5,9 +5,20 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from analysis.models import IndicatorSnapshot
+from analysis.models import IndicatorSnapshot, WhaleActivity
 from .forms import LotForm, PortfolioForm, ReportScheduleForm
 from .models import Lot, Portfolio, ReportAuditLog, ReportSchedule, Ticker
+
+
+def _annotate_whale_data(holdings):
+    """Add latest WhaleActivity to each holding dict."""
+    for h in holdings:
+        h['whale'] = (
+            WhaleActivity.objects.filter(ticker=h['ticker'])
+            .order_by('-date')
+            .first()
+        )
+    return holdings
 
 
 def dashboard(request):
@@ -36,7 +47,7 @@ def portfolio_list(request):
 
 def portfolio_detail(request, pk):
     portfolio = get_object_or_404(Portfolio, pk=pk, user=request.user)
-    holdings = portfolio.get_holdings()
+    holdings = _annotate_whale_data(portfolio.get_holdings())
 
     # Portfolio AI analysis (if previously generated)
     try:
@@ -133,7 +144,7 @@ def lot_create(request, portfolio_pk):
         if form.is_valid():
             form.save()
             if request.headers.get('HX-Request'):
-                holdings = portfolio.get_holdings()
+                holdings = _annotate_whale_data(portfolio.get_holdings())
                 return render(request, 'portfolio/partials/holdings_table.html', {
                     'portfolio': portfolio,
                     'holdings': holdings,
@@ -163,7 +174,7 @@ def lot_edit(request, pk):
         if form.is_valid():
             form.save()
             if request.headers.get('HX-Request'):
-                holdings = portfolio.get_holdings()
+                holdings = _annotate_whale_data(portfolio.get_holdings())
                 return render(request, 'portfolio/partials/holdings_table.html', {
                     'portfolio': portfolio,
                     'holdings': holdings,
@@ -192,7 +203,7 @@ def lot_delete(request, pk):
     if request.method == 'POST':
         lot.delete()
         if request.headers.get('HX-Request'):
-            holdings = portfolio.get_holdings()
+            holdings = _annotate_whale_data(portfolio.get_holdings())
             return render(request, 'portfolio/partials/holdings_table.html', {
                 'portfolio': portfolio,
                 'holdings': holdings,

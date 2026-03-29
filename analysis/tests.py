@@ -2,13 +2,18 @@ from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth.models import User
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from analysis.models import AIAnalysis, IndicatorSnapshot, OptionsSnapshot, PortfolioAnalysis
-from analysis.services import AIAnalysisService, PortfolioAnalysisService, TechnicalIndicatorService
+from analysis.models import (
+    AIAnalysis, CIKMapping, IndicatorSnapshot, OptionsSnapshot,
+    PortfolioAnalysis, SECFiling, WhaleActivity,
+)
+from analysis.sec_service import SECFilingService
+from analysis.services import AIAnalysisService, PortfolioAnalysisService, TechnicalIndicatorService, WhaleDetectionService
 from market.models import NewsArticle, PriceHistory
 from portfolio.models import Lot, Portfolio, Ticker, WatchlistItem
 
@@ -1035,3 +1040,364 @@ class PortfolioAnalysisViewTest(LoggedInTestCase):
             reverse('generate_portfolio_analysis', args=[self.portfolio.pk])
         )
         self.assertEqual(response.status_code, 405)
+
+
+# ── Whale Activity Tests ──────────────────────────────────────────────────────
+
+
+class CIKMappingModelTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_str(self):
+        mapping = CIKMapping.objects.create(ticker=self.ticker, cik='0000320193')
+        self.assertIn('AAPL', str(mapping))
+        self.assertIn('0000320193', str(mapping))
+
+    def test_one_to_one(self):
+        CIKMapping.objects.create(ticker=self.ticker, cik='0000320193')
+        with self.assertRaises(Exception):
+            CIKMapping.objects.create(ticker=self.ticker, cik='9999999999')
+
+
+class SECFilingModelTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_str(self):
+        filing = SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='Tim Cook', transaction_type='buy',
+            accession_number='0001234567890001',
+        )
+        self.assertIn('AAPL', str(filing))
+        self.assertIn('Tim Cook', str(filing))
+
+    def test_unique_together(self):
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='Tim Cook', transaction_type='buy',
+            accession_number='0001234567890001',
+        )
+        with self.assertRaises(Exception):
+            SECFiling.objects.create(
+                ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+                filer_name='Luca Maestri', transaction_type='sell',
+                accession_number='0001234567890001',
+            )
+
+    def test_ordering(self):
+        f1 = SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now() - timedelta(days=5),
+            filer_name='A', transaction_type='buy', accession_number='a1',
+        )
+        f2 = SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='B', transaction_type='sell', accession_number='a2',
+        )
+        filings = list(SECFiling.objects.filter(ticker=self.ticker))
+        self.assertEqual(filings[0].pk, f2.pk)
+
+
+class WhaleActivityModelTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_str(self):
+        whale = WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(), signal='bullish', confidence=75,
+        )
+        self.assertIn('AAPL', str(whale))
+        self.assertIn('bullish', str(whale))
+        self.assertIn('75%', str(whale))
+
+    def test_unique_together(self):
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(), signal='bullish',
+        )
+        with self.assertRaises(Exception):
+            WhaleActivity.objects.create(
+                ticker=self.ticker, date=date.today(), signal='bearish',
+            )
+
+    def test_ordering(self):
+        w1 = WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today() - timedelta(days=1), signal='neutral',
+        )
+        w2 = WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(), signal='bullish',
+        )
+        whales = list(WhaleActivity.objects.filter(ticker=self.ticker))
+        self.assertEqual(whales[0].pk, w2.pk)
+
+    def test_summary_text_with_data(self):
+        whale = WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(), signal='bullish',
+            confidence=80, insider_buy_count=3, block_trade_detected=True,
+        )
+        text = whale.summary_text
+        self.assertIn('3 insider buys', text)
+        self.assertIn('block trade', text)
+
+    def test_summary_text_neutral(self):
+        whale = WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(), signal='neutral',
+        )
+        self.assertEqual(whale.summary_text, 'Normal activity')
+
+
+class SECFilingServiceTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(symbol='AAPL')
+
+    def test_resolve_cik_cache_hit(self):
+        CIKMapping.objects.create(ticker=self.ticker, cik='0000320193')
+        cik = SECFilingService._resolve_cik(self.ticker)
+        self.assertEqual(cik, '0000320193')
+
+    @patch('analysis.sec_service._sec_get')
+    def test_resolve_cik_cache_miss(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            '0': {'cik_str': 320193, 'ticker': 'AAPL', 'title': 'Apple Inc'},
+        }
+        mock_get.return_value = mock_resp
+
+        cik = SECFilingService._resolve_cik(self.ticker)
+        self.assertEqual(cik, '0000320193')
+        self.assertTrue(CIKMapping.objects.filter(ticker=self.ticker).exists())
+
+    def test_refresh_sec_data_skips_if_recent(self):
+        # Create a recent filing so refresh should skip
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='Test', transaction_type='buy', accession_number='recent1',
+        )
+        with patch.object(SECFilingService, '_resolve_cik') as mock_cik:
+            SECFilingService.refresh_sec_data(self.ticker)
+            mock_cik.assert_not_called()
+
+    @patch('analysis.sec_service._sec_get')
+    def test_sec_error_handling(self, mock_get):
+        """SEC 403 error should not raise, just return empty."""
+        CIKMapping.objects.create(ticker=self.ticker, cik='0000320193')
+        mock_get.side_effect = requests.exceptions.HTTPError("403 Forbidden")
+        # Should not raise
+        result = SECFilingService.fetch_form4_filings(self.ticker)
+        self.assertEqual(result, [])
+
+    @patch('analysis.sec_service._sec_get')
+    def test_fetch_form4_dedup(self, mock_get):
+        """Duplicate accession numbers should not create duplicate records."""
+        CIKMapping.objects.create(ticker=self.ticker, cik='0000320193')
+        # Pre-existing filing
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='Tim Cook', transaction_type='buy',
+            accession_number='existing_0',
+        )
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'hits': {'hits': [{
+                '_id': 'existing',
+                '_source': {
+                    'file_date': timezone.now().isoformat(),
+                    'display_names': ['Tim Cook'],
+                    'accession_no': 'existing',
+                },
+            }]}
+        }
+        mock_get.return_value = mock_resp
+        result = SECFilingService.fetch_form4_filings(self.ticker)
+        # Should not create a new filing
+        self.assertEqual(len(result), 0)
+
+
+class WhaleDetectionServiceTest(TestCase):
+    def setUp(self):
+        self.ticker = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('180.00'), day_change_pct=Decimal('0.2'),
+        )
+        # Create some price history for volume analysis
+        for i in range(21):
+            PriceHistory.objects.create(
+                ticker=self.ticker,
+                date=date.today() - timedelta(days=20 - i),
+                open=Decimal('175.00'), high=Decimal('182.00'),
+                low=Decimal('174.00'), close=Decimal('180.00'),
+                volume=1000000,
+            )
+
+    def test_cluster_buying_bullish(self):
+        """3+ insiders buying in 14 days should produce a bullish signal."""
+        for i, name in enumerate(['Tim Cook', 'Luca Maestri', 'Jeff Williams']):
+            SECFiling.objects.create(
+                ticker=self.ticker, form_type='4',
+                filed_at=timezone.now() - timedelta(days=i),
+                filer_name=name, filer_title='SVP',
+                transaction_type='buy',
+                shares=Decimal('10000'), total_value=Decimal('1800000'),
+                accession_number=f'cluster_{i}',
+            )
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertIsNotNone(whale)
+        self.assertEqual(whale.signal, 'bullish')
+        self.assertGreaterEqual(whale.confidence, 40)
+        self.assertEqual(whale.insider_buy_count, 3)
+        self.assertTrue(whale.details.get('cluster_buy'))
+
+    def test_single_insider_sale_bearish(self):
+        """Large insider sales should push toward bearish."""
+        for i in range(4):
+            SECFiling.objects.create(
+                ticker=self.ticker, form_type='4',
+                filed_at=timezone.now() - timedelta(days=i),
+                filer_name=f'Seller {i}', transaction_type='sell',
+                shares=Decimal('50000'), total_value=Decimal('9000000'),
+                accession_number=f'sell_{i}',
+            )
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertIsNotNone(whale)
+        self.assertEqual(whale.signal, 'bearish')
+        self.assertEqual(whale.insider_sell_count, 4)
+
+    def test_13d_filing_boosts_confidence(self):
+        """13D filing should boost confidence."""
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='SC 13D',
+            filed_at=timezone.now() - timedelta(days=10),
+            filer_name='Activist Fund', transaction_type='acquisition',
+            accession_number='13d_1',
+        )
+        # Also add an insider buy to make it bullish
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='4',
+            filed_at=timezone.now(), filer_name='CEO',
+            transaction_type='buy', shares=Decimal('5000'),
+            total_value=Decimal('900000'), accession_number='buy_1',
+        )
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertIsNotNone(whale)
+        self.assertTrue(whale.has_13d_filing)
+        # 13D should boost confidence by 20
+        self.assertGreaterEqual(whale.confidence, 20)
+
+    def test_normal_activity_neutral(self):
+        """No filings, no unusual options, normal volume -> neutral."""
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertIsNotNone(whale)
+        self.assertEqual(whale.signal, 'neutral')
+        self.assertLessEqual(whale.confidence, 20)
+
+    def test_block_trade_detected(self):
+        """Volume spike > 5x average should flag block trade."""
+        # Set today's volume very high
+        today_price = PriceHistory.objects.filter(
+            ticker=self.ticker, date=date.today()
+        ).first()
+        if today_price:
+            today_price.volume = 10000000  # 10x average of 1M
+            today_price.save()
+
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertIsNotNone(whale)
+        self.assertTrue(whale.block_trade_detected)
+
+    def test_store_daily_snapshot_updates(self):
+        """Running twice on same day should update, not duplicate."""
+        whale1 = WhaleDetectionService.detect_whale_activity(self.ticker)
+        whale2 = WhaleDetectionService.detect_whale_activity(self.ticker)
+        self.assertEqual(whale1.pk, whale2.pk)
+        count = WhaleActivity.objects.filter(ticker=self.ticker, date=date.today()).count()
+        self.assertEqual(count, 1)
+
+    def test_sec_weighted_highest(self):
+        """SEC signals should be 50% of final score."""
+        # Create strong bullish SEC signals
+        for i, name in enumerate(['CEO', 'CFO', 'COO', 'CTO']):
+            SECFiling.objects.create(
+                ticker=self.ticker, form_type='4',
+                filed_at=timezone.now() - timedelta(days=i),
+                filer_name=name, transaction_type='buy',
+                shares=Decimal('10000'), total_value=Decimal('1800000'),
+                accession_number=f'sec_weight_{i}',
+            )
+        whale = WhaleDetectionService.detect_whale_activity(self.ticker)
+        # With strong SEC signals (score ~100) and neutral options/volume (50 each),
+        # weighted should be: 100*0.5 + 50*0.3 + 50*0.2 = 75, clearly bullish
+        self.assertEqual(whale.signal, 'bullish')
+        self.assertIn('weighted_score', whale.details)
+        self.assertGreater(whale.details['weighted_score'], 60)
+
+
+class WhaleHoldingsViewTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('180.00'),
+        )
+        self.portfolio = Portfolio.objects.create(name='Test', user=self.user)
+        Lot.objects.create(
+            portfolio=self.portfolio, ticker=self.ticker,
+            shares=Decimal('10'), cost_basis=Decimal('150.00'),
+            purchase_date=date(2024, 1, 1),
+        )
+
+    def test_holdings_shows_whale_indicator(self):
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(),
+            signal='bullish', confidence=78,
+            insider_buy_count=3, details={'summary': '3 insider buys'},
+        )
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '&#x1F40B;')  # whale emoji
+        self.assertContains(response, '78%')
+
+    def test_holdings_no_whale_data(self):
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        # Should show -- for whale column, not crash
+        content = response.content.decode()
+        self.assertIn('Whale', content)  # column header exists
+
+    def test_whale_detail_shows_insider_table(self):
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(),
+            signal='bullish', confidence=80,
+            insider_buy_count=2, has_13d_filing=True,
+            details={
+                'recent_form4s': [
+                    {'date': '2026-03-20', 'name': 'Tim Cook', 'title': 'CEO',
+                     'type': 'buy', 'shares': 10000, 'value': 1800000},
+                ],
+                'cluster_buy': False,
+                'summary': '2 insider buys + activist position',
+            },
+        )
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Insider Activity')
+        self.assertContains(response, 'Tim Cook')
+        self.assertContains(response, 'Activist Position (13D)')
+
+    def test_bearish_whale_shows_down_arrow(self):
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(),
+            signal='bearish', confidence=65,
+            insider_sell_count=3,
+        )
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        self.assertContains(response, '&darr;')
+        self.assertContains(response, '65%')
+
+    def test_neutral_whale_hidden(self):
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(),
+            signal='neutral', confidence=5,
+        )
+        response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
+        # Neutral should not show whale emoji
+        self.assertNotContains(response, '&#x1F40B;')

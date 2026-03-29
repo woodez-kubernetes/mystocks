@@ -239,6 +239,187 @@ The report currently shows per-holding details (shares, avg cost, price, value, 
 
 ---
 
+## Stage 6.12: Whale Activity Tracking
+**Goal:** Detect and display institutional ("whale") buying/selling activity for stocks in a user's portfolio, giving retail investors early signals about large-player moves.
+
+### What Counts as Whale Activity
+
+Whale activity is detected by combining three data dimensions — SEC filings (the most authoritative source), options flow, and volume anomalies:
+
+**SEC Filings (EDGAR — institutional & insider transactions):**
+1. **Form 4 (Insider Transactions)** — Officers, directors, and 10%+ owners must file within 2 business days of a buy/sell. Shows exact shares, price, and whether it's a direct purchase (most bullish) or option exercise. Insider *buying* with personal money is a strong bullish signal; cluster buying (multiple insiders in a short window) is even stronger.
+2. **Form 13F (Institutional Holdings)** — Hedge funds and institutions with $100M+ AUM file quarterly. By diffing consecutive 13F filings we detect position increases (accumulation) and decreases (distribution) by major funds.
+3. **Schedule 13D/13G (5%+ Ownership Stakes)** — Filed when an entity crosses the 5% ownership threshold. A new 13D (activist intent) is a major whale event. 13D amendments showing increased positions are also significant.
+
+**Options Flow & Volume Anomalies:**
+4. **Unusual Options Volume** — Single-day options volume exceeding 3× the 20-day average, weighted toward large-premium trades
+5. **Large Block Trades** — Individual equity trades of 10,000+ shares (or $500K+), sourced from volume spike analysis against intraday patterns
+6. **Put/Call OI Shifts** — Significant day-over-day changes in open interest ratios (>0.3 swing), indicating new large directional positions
+7. **Dark Pool Activity Proxy** — Off-exchange volume percentage anomalies (volume spikes not reflected in price movement suggest dark pool accumulation/distribution)
+8. **Volume-Price Divergence** — High volume with minimal price change suggests large players accumulating without moving the market
+
+Each signal is classified as **bullish** (whale buying), **bearish** (whale selling), or **neutral**.
+
+### Data Source Strategy
+
+Two free, public APIs — no paid subscriptions needed:
+
+**SEC EDGAR API (filings):**
+- **Full-text search**: `https://efts.sec.gov/LATEST/search-index?q=<TICKER>&forms=4,13F-HR,SC 13D` — find recent filings by form type and ticker
+- **Company filings**: `https://data.sec.gov/submissions/CIK<cik>.json` — all filings for a CIK (Central Index Key)
+- **XBRL data**: `https://data.sec.gov/api/xbrl/companyfacts/CIK<cik>.json` — structured ownership data
+- **Form 4 XML**: parsed for transaction type (P=purchase, S=sale), shares, price, ownership percentage
+- **13F CSV**: quarterly holdings table with CUSIP, shares, value — diffed against prior quarter
+- **Rate limit**: 10 requests/second with `User-Agent` header required (SEC fair access policy)
+- **Ticker→CIK mapping**: `https://www.sec.gov/files/company_tickers.json` — cached locally
+
+**yfinance (options & volume):**
+- **`ticker.options`** — options chain with volume, OI, strike, expiry (detects unusual options activity)
+- **`ticker.history(period='5d', interval='1h')`** — intraday volume patterns (detects block trade signatures)
+- **`ticker.info['averageVolume']`** / **`ticker.info['volume']`** — volume ratio for spike detection
+- Historical options OI is tracked locally by storing daily snapshots (new model)
+
+### Current State
+
+- `OptionsSnapshot` model already tracks `put_call_volume_ratio`, `put_call_oi_ratio`, `has_unusual_activity`, and `unusual_activity_details` per ticker
+- `OptionsDataService.fetch_options_data()` already fetches and scores options data during `refresh_ticker()`
+- Holdings table already shows opportunity score badges per ticker — whale indicator will sit beside it
+- The `refresh_ticker()` pipeline is the natural hook for computing whale signals
+
+### Tasks
+
+#### 6.12a: Models
+- [ ] **Create `SECFiling` model** in `analysis/models.py`:
+  - `ticker` — FK to Ticker
+  - `form_type` — CharField (e.g., `4`, `13F-HR`, `SC 13D`, `SC 13G`)
+  - `filed_at` — DateTimeField (SEC filing date)
+  - `filer_name` — CharField (insider name or institution name)
+  - `filer_title` — CharField (nullable — "CEO", "CFO", "Director", etc. for Form 4)
+  - `transaction_type` — CharField choices: `buy`, `sell`, `exercise`, `acquisition`, `disposition`
+  - `shares` — DecimalField (number of shares transacted)
+  - `price_per_share` — DecimalField (nullable — not always available on 13F)
+  - `total_value` — DecimalField (shares × price, or reported value)
+  - `ownership_pct` — DecimalField (nullable — percentage of outstanding shares, for 13D/G)
+  - `accession_number` — CharField (unique SEC filing ID, for dedup and linking back to EDGAR)
+  - `raw_data` — JSONField (full parsed filing data for reference)
+  - `created_at` — DateTimeField(auto_now_add=True)
+  - `unique_together = ('ticker', 'accession_number')`
+- [ ] **Create `WhaleActivity` model** in `analysis/models.py`:
+  - `ticker` — FK to Ticker (not OneToOne — we store a rolling history of daily snapshots)
+  - `date` — DateField (one record per ticker per day)
+  - `signal` — CharField choices: `bullish`, `bearish`, `neutral`
+  - `confidence` — IntegerField (0-100, how strong the whale signal is)
+  - **SEC filing signals:**
+  - `insider_buy_count` — IntegerField (Form 4 purchases in last 30 days)
+  - `insider_sell_count` — IntegerField (Form 4 sales in last 30 days)
+  - `insider_net_value` — DecimalField (net dollar value: buys minus sells)
+  - `institutional_change_pct` — DecimalField (nullable — quarter-over-quarter 13F position change %)
+  - `has_13d_filing` — BooleanField (new or amended 13D/G in last 90 days)
+  - **Options/volume signals:**
+  - `options_volume_ratio` — DecimalField (today's options vol / 20-day avg)
+  - `oi_change_ratio` — DecimalField (day-over-day OI shift magnitude)
+  - `block_trade_detected` — BooleanField
+  - `volume_price_divergence` — DecimalField (volume spike vs price change ratio)
+  - **Combined:**
+  - `details` — JSONField (full breakdown of all signal components for tooltip/detail view)
+  - `computed_at` — DateTimeField(auto_now=True)
+  - `unique_together = ('ticker', 'date')`
+- [ ] **Create `CIKMapping` model** in `analysis/models.py` (cache for SEC ticker→CIK lookups):
+  - `ticker` — OneToOneField to Ticker
+  - `cik` — CharField (SEC Central Index Key, zero-padded 10 digits)
+  - `updated_at` — DateTimeField(auto_now=True)
+- [ ] **Add migration**
+- [ ] **Register all three models in admin**
+
+#### 6.12b: SECFilingService
+- [ ] **Create `SECFilingService`** in `analysis/services.py` (or new `analysis/sec_service.py`):
+  - `_resolve_cik(ticker)` — look up CIK from `CIKMapping` cache; if miss, fetch from `https://www.sec.gov/files/company_tickers.json`, cache result; set `User-Agent` header per SEC policy
+  - `fetch_form4_filings(ticker, days=90)` — query EDGAR full-text search for recent Form 4 filings; parse XML for transaction details (transaction code: P=purchase, S=sale, A=grant, M=exercise); store as `SECFiling` records; skip duplicates via `accession_number`
+  - `fetch_13f_changes(ticker)` — query EDGAR for the two most recent 13F-HR filings containing this ticker's CUSIP; compute quarter-over-quarter share count change and percentage; return as institutional accumulation/distribution signal
+  - `fetch_13d_filings(ticker, days=90)` — query EDGAR for recent SC 13D and SC 13D/A filings; flag new activist positions or increased stakes
+  - `refresh_sec_data(ticker)` — orchestrates all three fetch methods for a ticker; respects SEC 10 req/sec rate limit with a shared throttle (`time.sleep(0.1)` between requests)
+- [ ] **SEC rate limiting** — use a module-level timestamp to ensure no more than 10 requests/second across all calls
+- [ ] **Error handling** — SEC EDGAR can return 403 (rate limited) or 500; retry once after 2s, then log and skip gracefully
+
+#### 6.12c: WhaleDetectionService
+- [ ] **Create `WhaleDetectionService`** in `analysis/services.py` with the following methods:
+  - `detect_whale_activity(ticker)` — main entry point, returns WhaleActivity instance; orchestrates SEC + options + volume analysis
+  - **SEC analysis methods:**
+  - `_analyze_insider_activity(ticker)` — query `SECFiling` for Form 4 records in last 30 days; count buys vs sells; compute net dollar value; flag cluster buying (3+ insiders buying within 2 weeks) as high-confidence bullish; weight direct purchases higher than option exercises
+  - `_analyze_institutional_holdings(ticker)` — use `SECFiling` 13F data to compute quarter-over-quarter position changes; flag if top-5 holders increased by >10% (bullish) or decreased by >10% (bearish)
+  - `_analyze_activist_positions(ticker)` — check for 13D/G filings in `SECFiling`; any new 13D = high-confidence bullish event; amended 13D with increased stake = moderate bullish
+  - **Options/volume methods (unchanged):**
+  - `_analyze_options_flow(ticker)` — compare today's options volume to 20-day average, flag if >3× with large premiums; check put/call OI shift vs yesterday's snapshot
+  - `_analyze_volume_anomalies(ticker)` — fetch 5-day intraday data, detect block-trade-sized volume spikes (single-bar volume >5× the bar average); compute volume-price divergence (high volume + <0.5% price change = accumulation signal)
+  - **Scoring:**
+  - `_compute_whale_signal(sec_signals, options_signals, volume_signals)` — weighted combination: SEC filings 50% (most authoritative), options flow 30%, volume anomalies 20%; SEC sub-weights: insider buys 25%, institutional changes 15%, activist 13D 10%; produces overall bullish/bearish/neutral with confidence (0-100)
+  - `_store_daily_snapshot(ticker, signal_data)` — create or update `WhaleActivity` for today's date
+- [ ] **Historical OI tracking** — each call to `_analyze_options_flow` stores current OI in `WhaleActivity.details` so tomorrow's run can compute the delta
+
+#### 6.12d: Integrate into Refresh Pipeline
+- [ ] **Hook `SECFilingService.refresh_sec_data(ticker)` into `StockDataService.refresh_ticker()`** — fetch latest SEC filings after options data; SEC data changes infrequently so skip if last fetch was <6 hours ago (check `CIKMapping.updated_at` or `SECFiling.created_at`)
+- [ ] **Hook `WhaleDetectionService.detect_whale_activity(ticker)` into `refresh_ticker()`** — runs after SEC + options + indicators are computed; combines all signals into today's `WhaleActivity` snapshot
+- [ ] **Add to `refresh_all`** — whale detection runs for each ticker in the batch; SEC calls are rate-limited (0.1s between) so add to the existing sleep budget
+
+#### 6.12e: Portfolio Holdings Display
+- [ ] **Add whale indicator column to holdings table** (`portfolio/partials/holdings_table.html`):
+  - New column after the opportunity score column
+  - Show a whale emoji + directional arrow: 🐋↑ (bullish), 🐋↓ (bearish), or nothing if neutral/no data
+  - Color-coded: green for bullish, red for bearish
+  - Confidence shown as small text (e.g., "78%")
+  - Tooltip on hover showing quick summary (e.g., "3 insider buys + unusual options volume")
+- [ ] **Pass whale data to template** — update `get_holdings()` or `portfolio_detail` view to annotate each holding with its latest `WhaleActivity` record
+- [ ] **Add whale column to portfolio list cards** — show count of tickers with active whale signals (e.g., "2 whale alerts")
+
+#### 6.12f: Whale Detail Expandable Row
+- [ ] **Expandable whale detail** — clicking the whale indicator expands a sub-row (like lot details) showing:
+  - **SEC Insider Activity** section:
+    - Recent Form 4 transactions table (date, insider name, title, buy/sell, shares, price, total value)
+    - Net insider sentiment bar (green for net buying, red for net selling)
+    - "Cluster buy" badge if 3+ insiders bought within 2 weeks
+  - **Institutional Holdings** section:
+    - Quarter-over-quarter position change (e.g., "+12.5% institutional accumulation")
+    - Top filer names if available from 13F data
+  - **Activist Alert** section (only if 13D filed):
+    - Filer name, ownership percentage, filing date
+    - Badge: "New Activist Position" or "Increased Stake"
+  - **Options Flow** section:
+    - Options volume ratio (e.g., "4.2× normal")
+    - OI shift direction and magnitude
+  - **Volume Anomalies** section:
+    - Block trade detection (yes/no with estimated size)
+    - Volume-price divergence metric
+  - Timestamp of last detection
+- [ ] **Style** — use existing collapsible row pattern from holdings table; dark theme consistent; sections use accordion or tabs to keep it compact
+
+#### 6.12g: Tests
+- [ ] **Model tests** — SECFiling creation and unique_together on accession_number; WhaleActivity creation and unique_together on (ticker, date); CIKMapping OneToOne constraint; signal choices validation
+- [ ] **SECFilingService tests** (mock HTTP responses):
+  - CIK resolution and caching (hit vs miss)
+  - Form 4 XML parsing — extracts transaction type, shares, price correctly
+  - 13F quarterly diff — detects accumulation and distribution
+  - 13D detection — flags new activist positions
+  - Rate limiting respected (no more than 10 req/sec)
+  - Graceful handling of SEC 403/500 errors
+  - Duplicate filing skipped via accession_number
+- [ ] **WhaleDetectionService tests** (mock SEC + yfinance data):
+  - Insider cluster buying (3+ Form 4 purchases in 2 weeks) → high-confidence bullish
+  - Single large insider sale → moderate bearish
+  - Institutional accumulation >10% → bullish signal
+  - New 13D filing → high-confidence bullish event
+  - High options volume → bullish signal detected
+  - Large OI shift toward puts → bearish signal
+  - Volume spike with no price movement → accumulation (bullish)
+  - Normal activity across all dimensions → neutral
+  - Combined scoring weights SEC signals highest
+  - Confidence scoring accuracy
+- [ ] **View tests** — whale indicator renders in holdings table, expandable detail shows SEC insider table, handles missing whale data gracefully
+- [ ] **Integration test** — `refresh_ticker` triggers SEC fetch + whale detection and stores results
+
+**Deliverables:** Whale activity detection combining SEC EDGAR filings (Form 4 insider transactions, 13F institutional holdings, 13D activist stakes) with yfinance options/volume data, displayed as a compact indicator beside each stock in the portfolio holdings table with expandable details showing insider trades, institutional moves, and options flow.
+
+---
+
 ## Stage 7: Polish, Performance & Deployment
 **Goal:** Final UI polish, performance optimization, and deployment readiness.
 

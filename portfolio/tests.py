@@ -939,3 +939,40 @@ class UserIsolationTest(TestCase):
         )
         self.assertEqual(response.status_code, 404)
         self.assertTrue(ReportSchedule.objects.filter(pk=schedule_a.pk).exists())
+
+
+class WhaleRefreshIntegrationTest(LoggedInTestCase):
+    """Test that refresh_ticker triggers SEC fetch and whale detection."""
+
+    @patch('market.services.StockDataService.get_quote')
+    @patch('market.services.StockDataService.get_company_info')
+    @patch('market.services.StockDataService.get_history')
+    @patch('market.services.NewsService.refresh_news')
+    @patch('market.services.OptionsDataService.fetch_options_data')
+    @patch('analysis.services.TechnicalIndicatorService.compute_indicators')
+    @patch('analysis.sec_service.SECFilingService.refresh_sec_data')
+    @patch('analysis.services.WhaleDetectionService.detect_whale_activity')
+    def test_refresh_ticker_triggers_whale_detection(
+        self, mock_whale, mock_sec, mock_indicators, mock_options,
+        mock_news, mock_history, mock_info, mock_quote,
+    ):
+        from market.services import StockDataService
+
+        mock_quote.return_value = {
+            'price': 180.0, 'prev_close': 178.0,
+            'day_change': 2.0, 'day_change_pct': 1.12, 'volume': 50000000,
+        }
+        mock_info.return_value = {
+            'company_name': 'Apple', 'sector': 'Technology',
+            'market_cap': 3000000000000, 'pe_ratio': 28.5,
+            'dividend_yield': 0.005, 'week_52_high': 200.0,
+            'week_52_low': 140.0, 'avg_volume': 45000000,
+        }
+        mock_history.return_value = []
+        mock_options.return_value = None
+
+        ticker = Ticker.objects.create(symbol='AAPL')
+        StockDataService.refresh_ticker(ticker)
+
+        mock_sec.assert_called_once_with(ticker)
+        mock_whale.assert_called_once_with(ticker)
