@@ -46,6 +46,13 @@ def ticker_detail(request, symbol):
     news_articles = NewsArticle.objects.filter(ticker=ticker)[:10]
     aggregate_sentiment = NewsService.get_aggregate_sentiment(ticker)
 
+    # Recent SEC filings (insider transactions)
+    from analysis.models import SECFiling, WhaleActivity
+    recent_filings = SECFiling.objects.filter(
+        ticker=ticker, form_type='4',
+    ).order_by('-filed_at')[:2]
+    whale = WhaleActivity.objects.filter(ticker=ticker).order_by('-date').first()
+
     context = {
         'ticker': ticker,
         'lots': lots,
@@ -57,6 +64,8 @@ def ticker_detail(request, symbol):
         'options_snapshot': options_snapshot,
         'news_articles': news_articles,
         'aggregate_sentiment': aggregate_sentiment,
+        'recent_filings': recent_filings,
+        'whale': whale,
     }
     return render(request, 'market/ticker_detail.html', context)
 

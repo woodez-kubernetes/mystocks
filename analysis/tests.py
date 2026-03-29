@@ -1393,11 +1393,14 @@ class WhaleHoldingsViewTest(LoggedInTestCase):
         self.assertContains(response, '&darr;')
         self.assertContains(response, '65%')
 
-    def test_neutral_whale_hidden(self):
+    def test_neutral_whale_shows_grey_emoji(self):
         WhaleActivity.objects.create(
             ticker=self.ticker, date=date.today(),
             signal='neutral', confidence=5,
         )
         response = self.client.get(reverse('portfolio_detail', args=[self.portfolio.pk]))
-        # Neutral should not show whale emoji
-        self.assertNotContains(response, '&#x1F40B;')
+        # Neutral shows a grey whale emoji (no arrow)
+        self.assertContains(response, '&#x1F40B;')
+        # But no directional arrows
+        self.assertNotContains(response, '&#x1F40B;&uarr;')
+        self.assertNotContains(response, '&#x1F40B;&darr;')

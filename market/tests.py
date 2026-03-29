@@ -941,3 +941,50 @@ class OptionsFetchIntegrationTest(TestCase):
         self.assertIn('options_signal', result)
         self.assertIsInstance(result['options_score'], int)
         self.assertIn(result['options_signal'], ('buy', 'hold', 'sell'))
+
+
+class TickerDetailWhaleTest(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ticker = Ticker.objects.create(
+            symbol='AAPL', company_name='Apple Inc.',
+            last_price=Decimal('178.50'), last_updated=timezone.now(),
+        )
+        PriceHistory.objects.create(
+            ticker=self.ticker, date=date(2024, 1, 15),
+            open=Decimal('175'), high=Decimal('180'), low=Decimal('174'),
+            close=Decimal('178.50'), volume=58000000,
+        )
+
+    def test_shows_insider_filings(self):
+        from analysis.models import SECFiling
+        SECFiling.objects.create(
+            ticker=self.ticker, form_type='4', filed_at=timezone.now(),
+            filer_name='Tim Cook', filer_title='CEO',
+            transaction_type='buy', shares=Decimal('10000'),
+            price_per_share=Decimal('178.50'),
+            total_value=Decimal('1785000'),
+            accession_number='test_filing_1',
+        )
+        response = self.client.get(reverse('ticker_detail', args=['AAPL']))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Insider Trading')
+        self.assertContains(response, 'Tim Cook')
+        self.assertContains(response, 'CEO')
+        self.assertContains(response, 'Buy')
+
+    def test_shows_no_filings_message(self):
+        response = self.client.get(reverse('ticker_detail', args=['AAPL']))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'No recent insider transactions found')
+
+    def test_shows_whale_signal_badge(self):
+        from analysis.models import WhaleActivity
+        WhaleActivity.objects.create(
+            ticker=self.ticker, date=date.today(),
+            signal='bullish', confidence=72,
+            insider_buy_count=2,
+        )
+        response = self.client.get(reverse('ticker_detail', args=['AAPL']))
+        self.assertContains(response, 'Bullish')
+        self.assertContains(response, '72%')

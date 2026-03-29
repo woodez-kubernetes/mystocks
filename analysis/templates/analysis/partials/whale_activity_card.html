@@ -1,0 +1,90 @@
+<!-- Whale Activity / Insider Trading -->
+<div class="card summary-card mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Insider Trading (SEC Filings)</h5>
+        {% if whale %}
+            <span class="badge {% if whale.signal == 'bullish' %}bg-success{% elif whale.signal == 'bearish' %}bg-danger{% else %}bg-secondary{% endif %}">
+                {% if whale.signal == 'bullish' %}&#x1F40B;&uarr; Bullish{% elif whale.signal == 'bearish' %}&#x1F40B;&darr; Bearish{% else %}Neutral{% endif %}
+                ({{ whale.confidence }}%)
+            </span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if recent_filings %}
+            <table class="table table-sm mb-3">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>Insider</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th class="text-end">Shares</th>
+                        <th class="text-end">Price</th>
+                        <th class="text-end">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in recent_filings %}
+                    <tr>
+                        <td>{{ f.filed_at|date:"M d, Y" }}</td>
+                        <td class="fw-semibold">{{ f.filer_name }}</td>
+                        <td><small class="text-muted">{{ f.filer_title|default:"--" }}</small></td>
+                        <td>
+                            <span class="badge {% if f.transaction_type == 'buy' %}bg-success{% elif f.transaction_type == 'sell' or f.transaction_type == 'disposition' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {{ f.get_transaction_type_display }}
+                            </span>
+                        </td>
+                        <td class="text-end">{% if f.shares %}{{ f.shares|floatformat:0 }}{% else %}--{% endif %}</td>
+                        <td class="text-end">{% if f.price_per_share %}${{ f.price_per_share|floatformat:2 }}{% else %}--{% endif %}</td>
+                        <td class="text-end">{% if f.total_value %}${{ f.total_value|floatformat:0 }}{% else %}--{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="text-muted mb-3">
+                <i class="bi bi-info-circle me-1"></i>
+                No recent insider transactions found. Click <strong>Refresh</strong> to fetch SEC filings from EDGAR.
+            </p>
+        {% endif %}
+
+        {% if whale %}
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Insider Buys (30d)</small>
+                    <span class="fw-bold fs-5 text-gain">{{ whale.insider_buy_count }}</span>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Insider Sells (30d)</small>
+                    <span class="fw-bold fs-5 text-loss">{{ whale.insider_sell_count }}</span>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="border rounded p-2 text-center">
+                    <small class="text-muted d-block">Net Value</small>
+                    <span class="fw-bold fs-5 {% if whale.insider_net_value >= 0 %}text-gain{% else %}text-loss{% endif %}">
+                        {% if whale.insider_net_value >= 0 %}+{% endif %}${{ whale.insider_net_value|floatformat:0 }}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% if whale.has_13d_filing %}
+            <div class="mt-2">
+                <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Activist Position (13D Filed)</span>
+            </div>
+        {% endif %}
+        {% if whale.details.cluster_buy %}
+            <div class="mt-2">
+                <span class="badge bg-success"><i class="bi bi-people me-1"></i>Cluster Buy Detected</span>
+            </div>
+        {% endif %}
+        {% else %}
+            {% if not recent_filings %}
+                <p class="text-muted mb-0">Whale activity data will appear after refreshing this ticker.</p>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
