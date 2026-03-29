@@ -18,6 +18,7 @@
                         <th class="text-end">Market Value</th>
                         <th class="text-end">Gain/Loss</th>
                         <th class="text-center">Score</th>
+                        <th class="text-center">Whale</th>
                         <th style="width: 50px;"></th>
                     </tr>
                 </thead>
@@ -72,11 +73,26 @@
                                 <span class="text-muted">--</span>
                             {% endif %}
                         </td>
+                        <td class="text-center">
+                            {% if h.whale and h.whale.signal != 'neutral' %}
+                                <span class="{% if h.whale.signal == 'bullish' %}text-gain{% else %}text-loss{% endif %}"
+                                      title="{{ h.whale.summary_text }}"
+                                      style="cursor: pointer; font-size: 1.1rem;"
+                                      data-bs-toggle="collapse"
+                                      data-bs-target="#whale-{{ h.ticker.symbol }}"
+                                      onclick="event.stopPropagation();">
+                                    &#x1F40B;{% if h.whale.signal == 'bullish' %}&uarr;{% else %}&darr;{% endif %}
+                                    <br><small style="font-size: 0.7rem;">{{ h.whale.confidence }}%</small>
+                                </span>
+                            {% else %}
+                                <span class="text-muted">--</span>
+                            {% endif %}
+                        </td>
                         <td></td>
                     </tr>
                     <!-- Expandable lot rows -->
                     <tr class="collapse lot-collapse" id="lots-{{ h.ticker.symbol }}">
-                        <td colspan="10" class="p-0 border-0">
+                        <td colspan="11" class="p-0 border-0">
                             <table class="table table-sm mb-0 lot-table">
                                 <tbody>
                                     {% for lot in h.lots %}
@@ -113,6 +129,7 @@
                                                 --
                                             {% endif %}
                                         </td>
+                                        <td colspan="2"></td>
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
                                                 <button class="btn btn-outline-secondary btn-sm"
@@ -141,6 +158,93 @@
                             </table>
                         </td>
                     </tr>
+                    <!-- Expandable whale detail row -->
+                    {% if h.whale and h.whale.signal != 'neutral' %}
+                    <tr class="collapse" id="whale-{{ h.ticker.symbol }}">
+                        <td colspan="11" class="p-0 border-0">
+                            <div class="p-3 border-top" style="background-color: #f8f9fa;">
+                                <div class="row g-3">
+                                    <!-- SEC Insider Activity -->
+                                    <div class="col-md-4">
+                                        <h6 class="fw-bold"><i class="bi bi-person-badge me-1"></i>Insider Activity (30d)</h6>
+                                        <div class="d-flex gap-3 mb-2">
+                                            <span class="text-gain fw-semibold">{{ h.whale.insider_buy_count }} buy{{ h.whale.insider_buy_count|pluralize }}</span>
+                                            <span class="text-loss fw-semibold">{{ h.whale.insider_sell_count }} sell{{ h.whale.insider_sell_count|pluralize }}</span>
+                                        </div>
+                                        <div class="mb-2">
+                                            Net value:
+                                            <span class="{% if h.whale.insider_net_value >= 0 %}text-gain{% else %}text-loss{% endif %} fw-semibold">
+                                                {% if h.whale.insider_net_value >= 0 %}+{% endif %}${{ h.whale.insider_net_value|floatformat:0 }}
+                                            </span>
+                                        </div>
+                                        {% if h.whale.details.cluster_buy %}
+                                            <span class="badge bg-success mb-2">Cluster Buy</span>
+                                        {% endif %}
+                                        {% if h.whale.details.recent_form4s %}
+                                        <table class="table table-sm table-borderless mt-2 mb-0" style="font-size: 0.8rem;">
+                                            <thead><tr><th>Date</th><th>Insider</th><th>Type</th><th>Shares</th><th>Value</th></tr></thead>
+                                            <tbody>
+                                            {% for f in h.whale.details.recent_form4s %}
+                                                <tr>
+                                                    <td>{{ f.date }}</td>
+                                                    <td>{{ f.name }}{% if f.title %} <small class="text-muted">({{ f.title }})</small>{% endif %}</td>
+                                                    <td>{{ f.type }}</td>
+                                                    <td>{{ f.shares|floatformat:0 }}</td>
+                                                    <td>${{ f.value|floatformat:0 }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                            </tbody>
+                                        </table>
+                                        {% endif %}
+                                    </div>
+
+                                    <!-- Institutional & Options -->
+                                    <div class="col-md-4">
+                                        <h6 class="fw-bold"><i class="bi bi-bank me-1"></i>Institutional Holdings</h6>
+                                        {% if h.whale.institutional_change_pct is not None %}
+                                            <p>QoQ Change:
+                                                <span class="{% if h.whale.institutional_change_pct >= 0 %}text-gain{% else %}text-loss{% endif %} fw-semibold">
+                                                    {% if h.whale.institutional_change_pct >= 0 %}+{% endif %}{{ h.whale.institutional_change_pct|floatformat:1 }}%
+                                                </span>
+                                            </p>
+                                        {% else %}
+                                            <p class="text-muted">No institutional data</p>
+                                        {% endif %}
+                                        {% if h.whale.has_13d_filing %}
+                                            <span class="badge bg-warning text-dark mb-2">Activist Position (13D)</span>
+                                        {% endif %}
+
+                                        <h6 class="fw-bold mt-3"><i class="bi bi-graph-up-arrow me-1"></i>Options Flow</h6>
+                                        {% if h.whale.options_volume_ratio %}
+                                            <p>Volume: <strong>{{ h.whale.options_volume_ratio|floatformat:1 }}&times;</strong> normal</p>
+                                        {% else %}
+                                            <p class="text-muted">No unusual options activity</p>
+                                        {% endif %}
+                                        {% if h.whale.oi_change_ratio %}
+                                            <p>OI Shift: {{ h.whale.oi_change_ratio|floatformat:2 }}</p>
+                                        {% endif %}
+                                    </div>
+
+                                    <!-- Volume Anomalies -->
+                                    <div class="col-md-4">
+                                        <h6 class="fw-bold"><i class="bi bi-bar-chart me-1"></i>Volume Anomalies</h6>
+                                        {% if h.whale.block_trade_detected %}
+                                            <span class="badge bg-info text-dark mb-2">Block Trade Detected</span>
+                                        {% endif %}
+                                        {% if h.whale.volume_price_divergence %}
+                                            <p>Vol/Price Divergence: {{ h.whale.volume_price_divergence|floatformat:2 }}</p>
+                                        {% endif %}
+                                        {% if not h.whale.block_trade_detected and not h.whale.volume_price_divergence %}
+                                            <p class="text-muted">No anomalies detected</p>
+                                        {% endif %}
+                                        <hr>
+                                        <small class="text-muted">Last updated: {{ h.whale.computed_at|date:"M d, Y g:i A" }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
                     {% endfor %}
                 </tbody>
             </table>

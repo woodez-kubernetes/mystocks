@@ -143,6 +143,10 @@ OLLAMA_HOST = 'http://llm.apexkube.xyz'
 OLLAMA_MODEL = 'llama3.2:1b'
 OLLAMA_TIMEOUT = 60
 
+# SEC EDGAR API settings
+SEC_EDGAR_USER_AGENT = os.environ.get('SEC_EDGAR_USER_AGENT', 'MyStocks/1.0 (admin@apexkube.xyz)')
+SEC_RATE_LIMIT_DELAY = 0.12
+
 # Email (Gmail SMTP)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
