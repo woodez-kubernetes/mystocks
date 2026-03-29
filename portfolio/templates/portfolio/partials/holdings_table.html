@@ -74,18 +74,34 @@
                             {% endif %}
                         </td>
                         <td class="text-center">
-                            {% if h.whale and h.whale.signal != 'neutral' %}
-                                <span class="{% if h.whale.signal == 'bullish' %}text-gain{% else %}text-loss{% endif %}"
+                            {% if h.whale and h.whale.signal == 'bullish' %}
+                                <span class="text-gain"
                                       title="{{ h.whale.summary_text }}"
                                       style="cursor: pointer; font-size: 1.1rem;"
                                       data-bs-toggle="collapse"
                                       data-bs-target="#whale-{{ h.ticker.symbol }}"
                                       onclick="event.stopPropagation();">
-                                    &#x1F40B;{% if h.whale.signal == 'bullish' %}&uarr;{% else %}&darr;{% endif %}
+                                    &#x1F40B;&uarr;
                                     <br><small style="font-size: 0.7rem;">{{ h.whale.confidence }}%</small>
                                 </span>
+                            {% elif h.whale and h.whale.signal == 'bearish' %}
+                                <span class="text-loss"
+                                      title="{{ h.whale.summary_text }}"
+                                      style="cursor: pointer; font-size: 1.1rem;"
+                                      data-bs-toggle="collapse"
+                                      data-bs-target="#whale-{{ h.ticker.symbol }}"
+                                      onclick="event.stopPropagation();">
+                                    &#x1F40B;&darr;
+                                    <br><small style="font-size: 0.7rem;">{{ h.whale.confidence }}%</small>
+                                </span>
+                            {% elif h.whale and h.whale.signal == 'neutral' %}
+                                <span class="text-muted" title="No notable whale activity"
+                                      style="cursor: pointer;"
+                                      data-bs-toggle="collapse"
+                                      data-bs-target="#whale-{{ h.ticker.symbol }}"
+                                      onclick="event.stopPropagation();">&#x1F40B;</span>
                             {% else %}
-                                <span class="text-muted">--</span>
+                                <span class="text-muted" title="Refresh to fetch whale data">--</span>
                             {% endif %}
                         </td>
                         <td></td>
@@ -159,7 +175,7 @@
                         </td>
                     </tr>
                     <!-- Expandable whale detail row -->
-                    {% if h.whale and h.whale.signal != 'neutral' %}
+                    {% if h.whale %}
                     <tr class="collapse" id="whale-{{ h.ticker.symbol }}">
                         <td colspan="11" class="p-0 border-0">
                             <div class="p-3 border-top" style="background-color: #f8f9fa;">
