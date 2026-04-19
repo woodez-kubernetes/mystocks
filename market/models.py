@@ -22,6 +22,23 @@ class PriceHistory(models.Model):
         return f"{self.ticker.symbol} {self.date} close={self.close}"
 
 
+class QuarterlyEarning(models.Model):
+    ticker = models.ForeignKey(
+        Ticker, on_delete=models.CASCADE, related_name='quarterly_earnings'
+    )
+    period_end_date = models.DateField()
+    fiscal_period = models.CharField(max_length=10)
+    eps_actual = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    growth_yoy_pct = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        unique_together = ('ticker', 'period_end_date')
+        ordering = ['-period_end_date']
+
+    def __str__(self):
+        return f"{self.ticker.symbol} {self.fiscal_period} eps={self.eps_actual}"
+
+
 SENTIMENT_CHOICES = [
     ('positive', 'Positive'),
     ('neutral', 'Neutral'),

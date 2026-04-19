@@ -4,7 +4,7 @@ from django.db import models
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, render
 
-from market.models import NewsArticle, PriceHistory, RSSFeedSource
+from market.models import NewsArticle, PriceHistory, QuarterlyEarning, RSSFeedSource
 from market.services import NewsService, StockDataService
 from portfolio.models import Lot, Ticker
 
@@ -46,6 +46,22 @@ def ticker_detail(request, symbol):
     news_articles = NewsArticle.objects.filter(ticker=ticker)[:10]
     aggregate_sentiment = NewsService.get_aggregate_sentiment(ticker)
 
+    # Quarterly earnings (4 most recent) with YoY growth %, display oldest -> newest
+    earnings_qs = list(
+        QuarterlyEarning.objects.filter(ticker=ticker).order_by('-period_end_date')[:4]
+    )
+    earnings_qs.reverse()
+    earnings_labels = [e.fiscal_period for e in earnings_qs]
+    earnings_growth_pct = [
+        float(e.growth_yoy_pct) if e.growth_yoy_pct is not None else None
+        for e in earnings_qs
+    ]
+    earnings_eps = [
+        float(e.eps_actual) if e.eps_actual is not None else None
+        for e in earnings_qs
+    ]
+    has_earnings = any(v is not None for v in earnings_growth_pct)
+
     # Recent SEC filings (insider transactions)
     from analysis.models import SECFiling, WhaleActivity
     recent_filings = SECFiling.objects.filter(
@@ -66,6 +82,10 @@ def ticker_detail(request, symbol):
         'aggregate_sentiment': aggregate_sentiment,
         'recent_filings': recent_filings,
         'whale': whale,
+        'earnings_labels': json.dumps(earnings_labels),
+        'earnings_growth_pct': json.dumps(earnings_growth_pct),
+        'earnings_eps': json.dumps(earnings_eps),
+        'has_earnings': has_earnings,
     }
     return render(request, 'market/ticker_detail.html', context)
 
