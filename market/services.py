@@ -30,8 +30,8 @@ def _nested_get(d, *keys):
     return d
 
 
-def _compute_yoy_pct(current, prior):
-    """YoY % change. Undefined when prior is missing or zero; sign-flip when prior is negative."""
+def _compute_growth_pct(current, prior):
+    """% change vs prior period. Undefined when prior is missing or zero; abs(prior) keeps sign meaningful when prior is negative."""
     if current is None or prior is None or prior == 0:
         return None
     pct = (current - prior) / abs(prior) * Decimal('100')
@@ -141,10 +141,13 @@ class StockDataService:
 
     @staticmethod
     def get_quarterly_earnings(symbol):
-        """Fetch last 8 quarters of EPS so the most recent 4 have YoY comparisons.
+        """Fetch last 4 quarters of EPS with QoQ growth % (vs prior quarter).
 
-        Returns a list of dicts ordered oldest->newest:
-            {period_end_date, fiscal_period, eps_actual, growth_yoy_pct}
+        yfinance's free tier only returns 4 quarters via get_earnings_history,
+        so YoY isn't computable — we use quarter-over-quarter instead.
+
+        Returns list ordered oldest->newest:
+            {period_end_date, fiscal_period, eps_actual, growth_qoq_pct}
         """
         try:
             stock = yf.Ticker(symbol)
@@ -152,12 +155,11 @@ class StockDataService:
             if hist is None or hist.empty:
                 return []
 
-            df = hist.sort_index().tail(8)
+            df = hist.sort_index().tail(4)
             quarters = []
             for idx, row in df.iterrows():
                 period_end = idx.date() if hasattr(idx, 'date') else idx
-                eps = row.get('epsActual')
-                eps_dec = _to_decimal(eps, places=4)
+                eps_dec = _to_decimal(row.get('epsActual'), places=4)
                 quarters.append({
                     'period_end_date': period_end,
                     'fiscal_period': f"{period_end.year}Q{((period_end.month - 1) // 3) + 1}",
@@ -165,8 +167,8 @@ class StockDataService:
                 })
 
             for i, q in enumerate(quarters):
-                prior = quarters[i - 4] if i >= 4 else None
-                q['growth_yoy_pct'] = _compute_yoy_pct(
+                prior = quarters[i - 1] if i >= 1 else None
+                q['growth_qoq_pct'] = _compute_growth_pct(
                     q['eps_actual'], prior['eps_actual'] if prior else None
                 )
             return quarters
@@ -176,20 +178,19 @@ class StockDataService:
 
     @staticmethod
     def refresh_quarterly_earnings(ticker_obj):
-        """Upsert last 4 quarters of earnings (with YoY growth) for this ticker."""
+        """Upsert last 4 quarters of earnings (with QoQ growth) for this ticker."""
         quarters = StockDataService.get_quarterly_earnings(ticker_obj.symbol)
         if not quarters:
             return 0
-        recent = quarters[-4:]
         saved = 0
-        for q in recent:
+        for q in quarters:
             QuarterlyEarning.objects.update_or_create(
                 ticker=ticker_obj,
                 period_end_date=q['period_end_date'],
                 defaults={
                     'fiscal_period': q['fiscal_period'],
                     'eps_actual': q['eps_actual'],
-                    'growth_yoy_pct': q['growth_yoy_pct'],
+                    'growth_qoq_pct': q['growth_qoq_pct'],
                 },
             )
             saved += 1

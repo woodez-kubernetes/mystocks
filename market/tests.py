@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from market.models import NewsArticle, PriceHistory, QuarterlyEarning, RSSFeedSource
 from market.services import NewsService, OptionsDataService, RSSNewsService, StockDataService
-from market.services import _compute_yoy_pct
+from market.services import _compute_growth_pct
 from portfolio.models import Lot, Portfolio, Ticker
 
 
@@ -991,32 +991,32 @@ class TickerDetailWhaleTest(LoggedInTestCase):
         self.assertContains(response, '72%')
 
 
-class QuarterlyEarningYoyGrowthTest(TestCase):
+class QuarterlyEarningGrowthPctTest(TestCase):
     def test_positive_growth(self):
         self.assertEqual(
-            _compute_yoy_pct(Decimal('1.50'), Decimal('1.00')),
+            _compute_growth_pct(Decimal('1.50'), Decimal('1.00')),
             Decimal('50.00'),
         )
 
     def test_negative_growth(self):
         self.assertEqual(
-            _compute_yoy_pct(Decimal('0.80'), Decimal('1.00')),
+            _compute_growth_pct(Decimal('0.80'), Decimal('1.00')),
             Decimal('-20.00'),
         )
 
     def test_prior_zero_returns_none(self):
-        self.assertIsNone(_compute_yoy_pct(Decimal('1.00'), Decimal('0')))
+        self.assertIsNone(_compute_growth_pct(Decimal('1.00'), Decimal('0')))
 
     def test_prior_negative_sign_preserved(self):
         # current improved from -0.50 to 0.50 -> +200%
         self.assertEqual(
-            _compute_yoy_pct(Decimal('0.50'), Decimal('-0.50')),
+            _compute_growth_pct(Decimal('0.50'), Decimal('-0.50')),
             Decimal('200.00'),
         )
 
     def test_none_inputs_return_none(self):
-        self.assertIsNone(_compute_yoy_pct(None, Decimal('1.00')))
-        self.assertIsNone(_compute_yoy_pct(Decimal('1.00'), None))
+        self.assertIsNone(_compute_growth_pct(None, Decimal('1.00')))
+        self.assertIsNone(_compute_growth_pct(Decimal('1.00'), None))
 
 
 class QuarterlyEarningServiceTest(TestCase):
@@ -1024,28 +1024,24 @@ class QuarterlyEarningServiceTest(TestCase):
         self.ticker = Ticker.objects.create(symbol='AAPL')
 
     @patch('market.services.yf.Ticker')
-    def test_get_quarterly_earnings_computes_yoy(self, mock_yf):
+    def test_get_quarterly_earnings_computes_qoq(self, mock_yf):
         import pandas as pd
-        # 8 quarters with increasing EPS; last 4 should each have YoY growth vs 4 quarters prior.
-        idx = pd.to_datetime([
-            '2024-03-31', '2024-06-30', '2024-09-30', '2024-12-31',
-            '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31',
-        ])
-        df = pd.DataFrame({'epsActual': [1.0, 1.2, 1.1, 1.3, 1.1, 1.5, 1.5, 1.95]}, index=idx)
+        idx = pd.to_datetime(['2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31'])
+        df = pd.DataFrame({'epsActual': [1.00, 1.50, 1.50, 1.95]}, index=idx)
         mock_stock = MagicMock()
         mock_stock.get_earnings_history.return_value = df
         mock_yf.return_value = mock_stock
 
         quarters = StockDataService.get_quarterly_earnings('AAPL')
-        self.assertEqual(len(quarters), 8)
-        # First 4 lack prior-year comparison
-        for q in quarters[:4]:
-            self.assertIsNone(q['growth_yoy_pct'])
-        # 2025Q1 vs 2024Q1: (1.1 - 1.0) / 1.0 * 100 = 10%
-        self.assertEqual(quarters[4]['growth_yoy_pct'], Decimal('10.00'))
-        # 2025Q2 vs 2024Q2: (1.5 - 1.2) / 1.2 * 100 = 25%
-        self.assertEqual(quarters[5]['growth_yoy_pct'], Decimal('25.00'))
-        self.assertEqual(quarters[4]['fiscal_period'], '2025Q1')
+        self.assertEqual(len(quarters), 4)
+        self.assertIsNone(quarters[0]['growth_qoq_pct'])  # no prior
+        # Q2 vs Q1: (1.5 - 1.0) / 1.0 * 100 = 50
+        self.assertEqual(quarters[1]['growth_qoq_pct'], Decimal('50.00'))
+        # Q3 vs Q2: flat -> 0
+        self.assertEqual(quarters[2]['growth_qoq_pct'], Decimal('0.00'))
+        # Q4 vs Q3: (1.95 - 1.5) / 1.5 * 100 = 30
+        self.assertEqual(quarters[3]['growth_qoq_pct'], Decimal('30.00'))
+        self.assertEqual(quarters[0]['fiscal_period'], '2025Q1')
 
     @patch('market.services.yf.Ticker')
     def test_get_quarterly_earnings_empty(self, mock_yf):
@@ -1063,11 +1059,8 @@ class QuarterlyEarningServiceTest(TestCase):
     @patch('market.services.yf.Ticker')
     def test_refresh_quarterly_earnings_upserts_latest_four(self, mock_yf):
         import pandas as pd
-        idx = pd.to_datetime([
-            '2024-03-31', '2024-06-30', '2024-09-30', '2024-12-31',
-            '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31',
-        ])
-        df = pd.DataFrame({'epsActual': [1.0, 1.2, 1.1, 1.3, 1.1, 1.5, 1.5, 1.95]}, index=idx)
+        idx = pd.to_datetime(['2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31'])
+        df = pd.DataFrame({'epsActual': [1.00, 1.50, 1.50, 1.95]}, index=idx)
         mock_stock = MagicMock()
         mock_stock.get_earnings_history.return_value = df
         mock_yf.return_value = mock_stock
@@ -1076,7 +1069,8 @@ class QuarterlyEarningServiceTest(TestCase):
         self.assertEqual(saved, 4)
         rows = list(QuarterlyEarning.objects.filter(ticker=self.ticker).order_by('period_end_date'))
         self.assertEqual([r.fiscal_period for r in rows], ['2025Q1', '2025Q2', '2025Q3', '2025Q4'])
-        self.assertEqual(rows[0].growth_yoy_pct, Decimal('10.00'))
+        self.assertIsNone(rows[0].growth_qoq_pct)
+        self.assertEqual(rows[1].growth_qoq_pct, Decimal('50.00'))
 
         # Idempotent: running again with same data keeps count at 4
         StockDataService.refresh_quarterly_earnings(self.ticker)
@@ -1099,22 +1093,21 @@ class TickerDetailEarningsContextTest(LoggedInTestCase):
 
     def test_earnings_populated_context(self):
         for period_end, period, eps, growth in [
-            (date(2025, 3, 31), '2025Q1', Decimal('1.10'), Decimal('10.00')),
-            (date(2025, 6, 30), '2025Q2', Decimal('1.50'), Decimal('25.00')),
-            (date(2025, 9, 30), '2025Q3', Decimal('1.50'), Decimal('36.36')),
-            (date(2025, 12, 31), '2025Q4', Decimal('1.95'), Decimal('50.00')),
+            (date(2025, 3, 31), '2025Q1', Decimal('1.00'), None),
+            (date(2025, 6, 30), '2025Q2', Decimal('1.50'), Decimal('50.00')),
+            (date(2025, 9, 30), '2025Q3', Decimal('1.50'), Decimal('0.00')),
+            (date(2025, 12, 31), '2025Q4', Decimal('1.95'), Decimal('30.00')),
         ]:
             QuarterlyEarning.objects.create(
                 ticker=self.ticker, period_end_date=period_end,
-                fiscal_period=period, eps_actual=eps, growth_yoy_pct=growth,
+                fiscal_period=period, eps_actual=eps, growth_qoq_pct=growth,
             )
         response = self.client.get(reverse('ticker_detail', args=['AAPL']))
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context['has_earnings'])
-        # Rendered oldest -> newest
         import json as _json
         labels = _json.loads(response.context['earnings_labels'])
         growth = _json.loads(response.context['earnings_growth_pct'])
         self.assertEqual(labels, ['2025Q1', '2025Q2', '2025Q3', '2025Q4'])
-        self.assertEqual(growth, [10.0, 25.0, 36.36, 50.0])
+        self.assertEqual(growth, [None, 50.0, 0.0, 30.0])
         self.assertContains(response, 'Quarterly EPS Growth')

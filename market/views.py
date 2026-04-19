@@ -46,14 +46,14 @@ def ticker_detail(request, symbol):
     news_articles = NewsArticle.objects.filter(ticker=ticker)[:10]
     aggregate_sentiment = NewsService.get_aggregate_sentiment(ticker)
 
-    # Quarterly earnings (4 most recent) with YoY growth %, display oldest -> newest
+    # Quarterly earnings (4 most recent) with QoQ growth %, display oldest -> newest
     earnings_qs = list(
         QuarterlyEarning.objects.filter(ticker=ticker).order_by('-period_end_date')[:4]
     )
     earnings_qs.reverse()
     earnings_labels = [e.fiscal_period for e in earnings_qs]
     earnings_growth_pct = [
-        float(e.growth_yoy_pct) if e.growth_yoy_pct is not None else None
+        float(e.growth_qoq_pct) if e.growth_qoq_pct is not None else None
         for e in earnings_qs
     ]
     earnings_eps = [
