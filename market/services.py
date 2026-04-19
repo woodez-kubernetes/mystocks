@@ -12,7 +12,7 @@ from django.db.models import Avg
 from django.utils import timezone
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from market.models import NewsArticle, PriceHistory, RSSFeedSource
+from market.models import NewsArticle, PriceHistory, QuarterlyEarning, RSSFeedSource
 from portfolio.models import Ticker
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,14 @@ def _nested_get(d, *keys):
         else:
             return None
     return d
+
+
+def _compute_yoy_pct(current, prior):
+    """YoY % change. Undefined when prior is missing or zero; sign-flip when prior is negative."""
+    if current is None or prior is None or prior == 0:
+        return None
+    pct = (current - prior) / abs(prior) * Decimal('100')
+    return _to_decimal(pct, places=2)
 
 
 def _to_decimal(value, places=2):
@@ -132,6 +140,62 @@ class StockDataService:
             return {}
 
     @staticmethod
+    def get_quarterly_earnings(symbol):
+        """Fetch last 8 quarters of EPS so the most recent 4 have YoY comparisons.
+
+        Returns a list of dicts ordered oldest->newest:
+            {period_end_date, fiscal_period, eps_actual, growth_yoy_pct}
+        """
+        try:
+            stock = yf.Ticker(symbol)
+            hist = stock.get_earnings_history()
+            if hist is None or hist.empty:
+                return []
+
+            df = hist.sort_index().tail(8)
+            quarters = []
+            for idx, row in df.iterrows():
+                period_end = idx.date() if hasattr(idx, 'date') else idx
+                eps = row.get('epsActual')
+                eps_dec = _to_decimal(eps, places=4)
+                quarters.append({
+                    'period_end_date': period_end,
+                    'fiscal_period': f"{period_end.year}Q{((period_end.month - 1) // 3) + 1}",
+                    'eps_actual': eps_dec,
+                })
+
+            for i, q in enumerate(quarters):
+                prior = quarters[i - 4] if i >= 4 else None
+                q['growth_yoy_pct'] = _compute_yoy_pct(
+                    q['eps_actual'], prior['eps_actual'] if prior else None
+                )
+            return quarters
+        except Exception:
+            logger.exception(f"Failed to fetch quarterly earnings for {symbol}")
+            return []
+
+    @staticmethod
+    def refresh_quarterly_earnings(ticker_obj):
+        """Upsert last 4 quarters of earnings (with YoY growth) for this ticker."""
+        quarters = StockDataService.get_quarterly_earnings(ticker_obj.symbol)
+        if not quarters:
+            return 0
+        recent = quarters[-4:]
+        saved = 0
+        for q in recent:
+            QuarterlyEarning.objects.update_or_create(
+                ticker=ticker_obj,
+                period_end_date=q['period_end_date'],
+                defaults={
+                    'fiscal_period': q['fiscal_period'],
+                    'eps_actual': q['eps_actual'],
+                    'growth_yoy_pct': q['growth_yoy_pct'],
+                },
+            )
+            saved += 1
+        return saved
+
+    @staticmethod
     def refresh_ticker(ticker_obj):
         """Full refresh: update Ticker fields + cache PriceHistory."""
         symbol = ticker_obj.symbol
@@ -232,6 +296,12 @@ class StockDataService:
             WhaleDetectionService.detect_whale_activity(ticker_obj)
         except Exception:
             logger.exception(f"Failed to detect whale activity for {symbol}")
+
+        # 9. Cache quarterly earnings (4 most recent quarters with YoY growth)
+        try:
+            StockDataService.refresh_quarterly_earnings(ticker_obj)
+        except Exception:
+            logger.exception(f"Failed to fetch quarterly earnings for {symbol}")
 
         return ticker_obj
 
