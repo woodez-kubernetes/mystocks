@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: kwood475/mystocks
-  tag: release-dev-afa563e
+  tag: release-dev-6713b61
   pullPolicy: Always
 namespace: woodez-database
 ingress:
