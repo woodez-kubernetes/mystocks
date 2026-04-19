@@ -29,7 +29,7 @@ class QuarterlyEarning(models.Model):
     period_end_date = models.DateField()
     fiscal_period = models.CharField(max_length=10)
     eps_actual = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
-    growth_yoy_pct = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    growth_qoq_pct = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         unique_together = ('ticker', 'period_end_date')

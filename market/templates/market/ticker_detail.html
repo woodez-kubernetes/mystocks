@@ -45,17 +45,17 @@
 </div>
 
 {% if has_earnings %}
-<!-- Quarterly EPS YoY Growth -->
+<!-- Quarterly EPS QoQ Growth -->
 <div class="card summary-card mb-4">
     <div class="card-header bg-white">
-        <h5 class="mb-0"><i class="bi bi-bar-chart-fill me-2"></i>Quarterly EPS Growth (YoY)</h5>
+        <h5 class="mb-0"><i class="bi bi-bar-chart-fill me-2"></i>Quarterly EPS Growth (QoQ)</h5>
     </div>
     <div class="card-body">
         <div style="position: relative; height: 280px;">
             <canvas id="earningsChart"></canvas>
         </div>
         <small class="text-muted d-block mt-2">
-            % change in reported EPS vs. the same quarter one year prior. Gaps indicate missing prior-year data.
+            % change in reported EPS vs. the prior quarter. The oldest bar has no comparison and is shown in grey.
         </small>
     </div>
 </div>
@@ -391,7 +391,7 @@
         data: {
             labels: labels,
             datasets: [{
-                label: 'EPS YoY %',
+                label: 'EPS QoQ %',
                 data: growth,
                 backgroundColor: colors,
                 borderWidth: 0,
@@ -409,7 +409,7 @@
                             const e = eps[ctx.dataIndex];
                             const epsStr = e === null ? 'n/a' : '$' + e.toFixed(2);
                             const growthStr = g === null ? 'n/a' : g.toFixed(2) + '%';
-                            return ['EPS: ' + epsStr, 'YoY: ' + growthStr];
+                            return ['EPS: ' + epsStr, 'QoQ: ' + growthStr];
                         }
                     }
                 }
